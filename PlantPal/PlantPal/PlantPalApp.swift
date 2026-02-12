@@ -13,7 +13,8 @@ struct PlantPalApp: App {
             PlantProfile.self,
             ChatMessage.self,
             ConversationSummary.self,
-            PlantMemory.self
+            PlantMemory.self,
+            CareTask.self
         ])
     }
 }

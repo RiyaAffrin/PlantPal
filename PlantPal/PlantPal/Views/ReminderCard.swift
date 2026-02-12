@@ -1,38 +1,47 @@
 import SwiftUI
 
 struct ReminderCard: View {
-    let item: ReminderItem
+    let title: String
+    let dueDate: Date
+    let notes: String
+    let isCompleted: Bool
     var onToggle: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onToggle) {
-                Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
+                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(item.isCompleted ? .green : .secondary)
+                    .foregroundStyle(isCompleted ? .green : .secondary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
+                Text(title)
                     .font(.headline)
-                Text(item.dueDate, style: .time)
+                Text(dueDate, style: .date)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !notes.isEmpty {
+                    Text(notes)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()
-
-            Button("Snooze") {
-                // Placeholder for snooze logic.
-            }
-            .buttonStyle(.bordered)
         }
         .padding(.vertical, 6)
     }
 }
 
 #Preview {
-    ReminderCard(item: ReminderItem(title: "Water Monstera", dueDate: .daysFromNow(0), isCompleted: false)) {
+    ReminderCard(
+        title: "Water Monstera",
+        dueDate: .daysFromNow(0),
+        notes: "Check top 2 inches of soil first.",
+        isCompleted: false
+    ) {
         // Preview action
     }
 }

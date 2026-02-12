@@ -66,6 +66,29 @@ final class PlantMemory {
     }
 }
 
+@Model
+final class CareTask {
+    var plantName: String
+    var title: String
+    var notes: String
+    var dueDate: Date
+    var isCompleted: Bool
+    var createdAt: Date
+
+    init(plantName: String,
+         title: String,
+         notes: String,
+         dueDate: Date,
+         isCompleted: Bool = false) {
+        self.plantName = plantName
+        self.title = title
+        self.notes = notes
+        self.dueDate = dueDate
+        self.isCompleted = isCompleted
+        self.createdAt = Date()
+    }
+}
+
 struct ReminderItem: Identifiable, Hashable {
     let id = UUID()
     var title: String

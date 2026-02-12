@@ -7,85 +7,70 @@ struct ChatView: View {
     @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
     @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
+    @Query(sort: \CareTask.createdAt, order: .forward) private var allTasks: [CareTask]
 
     @State private var inputText = ""
     @State private var setupStep: SetupStep = .askPlantName
+    @State private var selectedPlantName = "PlantPal"
+    @State private var isInConversation = false
     @State private var isSending = false
     @State private var errorMessage: String?
 
-    private var activeProfile: PlantProfile? { profiles.first }
+    private var availablePlantNames: [String] {
+        let profileNames = profiles.map(\.name)
+        let messageNames = messages.map(\.plantName).filter { $0 != "PlantPal" }
+        let merged = Set(profileNames + messageNames)
+        return merged.sorted()
+    }
+
+    private var activeProfile: PlantProfile? {
+        profiles.first(where: { $0.name == selectedPlantName })
+    }
+
+    private var visibleMessages: [ChatMessage] {
+        messages.filter { $0.plantName == selectedPlantName || ($0.plantName == "PlantPal" && selectedPlantName == "PlantPal") }
+    }
+
     private var activeSummary: ConversationSummary? {
-        guard let plantName = activeProfile?.name else { return summaries.first }
-        return summaries.first(where: { $0.plantName == plantName })
+        summaries.first(where: { $0.plantName == selectedPlantName })
     }
 
     private var activeMemory: PlantMemory? {
-        guard let plantName = activeProfile?.name else { return memories.first }
-        return memories.first(where: { $0.plantName == plantName })
+        memories.first(where: { $0.plantName == selectedPlantName })
+    }
+
+    private var threads: [ChatThread] {
+        let plantsFromMessages = Set(messages.map(\.plantName))
+        let plantsFromProfiles = Set(profiles.map(\.name))
+        let allPlants = plantsFromMessages.union(plantsFromProfiles)
+
+        return allPlants.map { plantName in
+            let plantMessages = messages.filter { $0.plantName == plantName }
+            return ChatThread(
+                plantName: plantName,
+                lastMessage: plantMessages.last?.content ?? "No messages yet",
+                lastUpdatedAt: plantMessages.last?.createdAt ?? Date.distantPast
+            )
+        }
+        .sorted { $0.lastUpdatedAt > $1.lastUpdatedAt }
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            if let memory = activeMemory {
-                                StructuredMemoryCard(memory: memory)
-                                    .id("memory")
-                            }
-
-                            if let summary = activeSummary {
-                                SummaryCard(summary: summary.summary)
-                                    .id("summary")
-                            }
-
-                            ForEach(messages) { message in
-                                MessageBubble(message: message)
-                                    .id(message.id)
-                            }
-
-                            if messages.isEmpty {
-                                WelcomeCard()
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 16)
-                    }
-                    .onChange(of: messages.count) { _, _ in
-                        if let last = messages.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-
-                Divider()
-
-                HStack(spacing: 12) {
-                    TextField("Message PlantPal", text: $inputText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
-
-                    Button("Send") {
-                        handleSend()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isSending)
-                    .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding()
-            }
-            .navigationTitle(activeProfile?.personaName ?? "PlantPal")
-            .toolbar {
-                if activeProfile != nil {
-                    Button("New Plant") {
-                        resetPlant()
-                    }
+            Group {
+                if isInConversation {
+                    conversationView
+                } else {
+                    historyListView
                 }
             }
+            .navigationTitle("Chat")
+            .toolbar { chatToolbar }
             .onAppear {
+                if !availablePlantNames.contains(selectedPlantName) {
+                    selectedPlantName = availablePlantNames.first ?? "PlantPal"
+                }
                 refreshSetupStep()
-                seedIfNeeded()
             }
             .alert(
                 "Error",
@@ -101,10 +86,140 @@ struct ChatView: View {
         }
     }
 
+    @ToolbarContentBuilder
+    private var chatToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarLeading) {
+            if isInConversation {
+                Button("Back") {
+                    isInConversation = false
+                }
+            }
+        }
+
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if isInConversation && activeProfile != nil {
+                Button("New Plant") {
+                    resetPlant()
+                }
+            }
+        }
+    }
+
+    private var historyListView: some View {
+        VStack(spacing: 0) {
+            List {
+                if threads.isEmpty {
+                    Text("No chat history yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(threads) { thread in
+                        Button {
+                            openConversation(for: thread.plantName)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Chat about \(thread.plantName) plant")
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text(thread.lastMessage)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Button("Start a chat") {
+                startChat()
+            }
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity)
+            .padding()
+        }
+    }
+
+    private var conversationView: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        Text("Chat about \(selectedPlantName) plant")
+                            .font(.headline)
+                            .padding(.top, 4)
+
+                        if let memory = activeMemory {
+                            StructuredMemoryCard(memory: memory)
+                                .id("memory")
+                        }
+
+                        if let summary = activeSummary {
+                            SummaryCard(summary: summary.summary)
+                                .id("summary")
+                        }
+
+                        ForEach(visibleMessages) { message in
+                            MessageBubble(message: message)
+                                .id(message.id)
+                        }
+
+                        if visibleMessages.isEmpty {
+                            WelcomeCard()
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 16)
+                }
+                .onChange(of: visibleMessages.count) { _, _ in
+                    if let last = visibleMessages.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                TextField("Message PlantPal", text: $inputText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+
+                Button("Send") {
+                    handleSend()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSending)
+                .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding()
+        }
+    }
+
     private func seedIfNeeded() {
-        if messages.isEmpty {
+        if visibleMessages.isEmpty {
             addAgentMessage("Hi, I am PlantPal. What plant are you caring for?")
         }
+    }
+
+    private func openConversation(for plantName: String) {
+        selectedPlantName = plantName
+        refreshSetupStep()
+        isInConversation = true
+        seedIfNeeded()
+    }
+
+    private func startChat() {
+        if let first = availablePlantNames.first {
+            selectedPlantName = first
+        } else {
+            selectedPlantName = "PlantPal"
+        }
+        refreshSetupStep()
+        isInConversation = true
+        seedIfNeeded()
     }
 
     private func refreshSetupStep() {
@@ -120,16 +235,20 @@ struct ChatView: View {
         guard !trimmed.isEmpty else { return }
         inputText = ""
 
-        let userMessage = addUserMessage(trimmed)
-
         if activeProfile == nil {
-            handleSetupResponse(trimmed)
+            _ = addUserMessage(trimmed)
+            isSending = true
+            Task {
+                await handleSetupResponse(trimmed)
+                isSending = false
+            }
         } else {
+            let userMessage = addUserMessage(trimmed)
             isSending = true
             updateStructuredMemory(from: trimmed)
             Task {
                 do {
-                    let history = (messages + [userMessage]).suffix(20)
+                    let history = (visibleMessages + [userMessage]).suffix(20)
                     let reply = try await GeminiService().generateReply(
                         history: Array(history),
                         memory: activeMemory,
@@ -145,9 +264,10 @@ struct ChatView: View {
         }
     }
 
-    private func handleSetupResponse(_ text: String) {
+    private func handleSetupResponse(_ text: String) async {
         switch setupStep {
         case .askPlantName:
+            selectedPlantName = text
             addAgentMessage("Great. What type of plant is \(text)?")
             setupStep = .askPlantType(name: text)
         case .askPlantType(let name):
@@ -157,14 +277,45 @@ struct ChatView: View {
             let personaName = name
             let profile = PlantProfile(name: name, type: type, location: text, personaName: personaName)
             modelContext.insert(profile)
+            selectedPlantName = name
             addAgentMessage("Hi, I am \(personaName), your \(type). Ask me about care anytime.")
+            let frequency = wateringFrequencyDays(for: type)
+            let tasks = await generatedTasksFromGemini(
+                name: name,
+                type: type,
+                location: text,
+                frequencyDays: frequency
+            )
+            replaceTasks(for: name, with: tasks)
             setupStep = .complete
             updateSummary(with: "Plant: \(name) (\(type)) at \(text).")
             upsertMemory { memory in
+                memory.wateringFrequencyDays = frequency
                 memory.lightPreference = text
             }
         case .complete:
             break
+        }
+    }
+
+    private func generatedTasksFromGemini(name: String, type: String, location: String, frequencyDays: Int) async -> [CareTask] {
+        do {
+            let aiTasks = try await GeminiService().generateCareSchedule(
+                plantName: name,
+                plantType: type,
+                location: location
+            )
+            return aiTasks.map { task in
+                let dueDate = Calendar.current.date(byAdding: .day, value: task.dayOffset, to: Date()) ?? Date()
+                return CareTask(
+                    plantName: name,
+                    title: task.title,
+                    notes: task.notes,
+                    dueDate: dueDate
+                )
+            }
+        } catch {
+            return generatedTasks(name: name, type: type, location: location, frequencyDays: frequencyDays)
         }
     }
 
@@ -223,26 +374,61 @@ struct ChatView: View {
         return nil
     }
 
+    private func generatedTasks(name: String, type: String, location: String, frequencyDays: Int) -> [CareTask] {
+        let entries: [(title: String, notes: String, dayOffset: Int)] = [
+            ("Water \(name)", "Water thoroughly if top soil feels dry. Location: \(location).", 0),
+            ("Check soil moisture for \(name)", "Touch the top 2 inches of soil before watering.", max(1, frequencyDays / 2)),
+            ("Inspect leaves of \(name)", "Look for yellowing, curling, or pests.", 2),
+            ("Rotate \(name)", "Rotate the pot to even out light exposure.", 7),
+            ("Water \(name)", "Regular watering cycle for \(type).", frequencyDays)
+        ]
+
+        return entries.map { entry in
+            let dueDate = Calendar.current.date(byAdding: .day, value: entry.dayOffset, to: Date()) ?? Date()
+            return CareTask(plantName: name, title: entry.title, notes: entry.notes, dueDate: dueDate)
+        }
+    }
+
+    private func replaceTasks(for plantName: String, with tasks: [CareTask]) {
+        let existing = allTasks.filter { $0.plantName == plantName }
+        existing.forEach { modelContext.delete($0) }
+        tasks.forEach { modelContext.insert($0) }
+    }
+
+    private func wateringFrequencyDays(for plantType: String) -> Int {
+        let lower = plantType.lowercased()
+        if lower.contains("cactus") || lower.contains("succulent") {
+            return 10
+        }
+        if lower.contains("fern") || lower.contains("calathea") {
+            return 3
+        }
+        return 5
+    }
+
     private func addUserMessage(_ text: String) -> ChatMessage {
-        let plantName = activeProfile?.name ?? "PlantPal"
+        let plantName = selectedPlantName
         let message = ChatMessage(role: "user", content: text, plantName: plantName)
         modelContext.insert(message)
         return message
     }
 
     private func addAgentMessage(_ text: String) {
-        let plantName = activeProfile?.name ?? "PlantPal"
+        let plantName = selectedPlantName
         let message = ChatMessage(role: "assistant", content: text, plantName: plantName)
         modelContext.insert(message)
     }
 
     private func resetPlant() {
+        let targetPlant = selectedPlantName
         if let profile = activeProfile {
             modelContext.delete(profile)
         }
-        messages.forEach { modelContext.delete($0) }
-        summaries.forEach { modelContext.delete($0) }
-        memories.forEach { modelContext.delete($0) }
+        messages.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
+        summaries.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
+        memories.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
+        allTasks.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
+        selectedPlantName = "PlantPal"
         addAgentMessage("Hi, I am PlantPal. What plant are you caring for?")
         setupStep = .askPlantName
     }
@@ -253,6 +439,13 @@ private enum SetupStep: Equatable {
     case askPlantType(name: String)
     case askLocation(name: String, type: String)
     case complete
+}
+
+private struct ChatThread: Identifiable {
+    var id: String { plantName }
+    let plantName: String
+    let lastMessage: String
+    let lastUpdatedAt: Date
 }
 
 struct WelcomeCard: View {
@@ -349,6 +542,7 @@ struct MessageBubble: View {
             PlantProfile.self,
             ChatMessage.self,
             ConversationSummary.self,
-            PlantMemory.self
+            PlantMemory.self,
+            CareTask.self
         ], inMemory: true)
 }

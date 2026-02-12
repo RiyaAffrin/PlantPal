@@ -94,7 +94,7 @@ private extension MeView {
     }
 
     func connectGoogleCalendar() {
-        calendarStatusMessage = "正在连接 Google..."
+        calendarStatusMessage = "Now connecting Google..."
         Task {
             await googleAuth.signIn()
             guard googleAuth.isSignedIn, let token = googleAuth.accessToken else {
@@ -118,7 +118,7 @@ private extension MeView {
 
             do {
                 try await GoogleCalendarService().createEvents(from: plan, accessToken: token)
-                calendarStatusMessage = "已连接并创建示例提醒。"
+                calendarStatusMessage = "Sample reminder has been connected and created."
                 showCalendarAlert = true
             } catch {
                 calendarStatusMessage = error.localizedDescription
