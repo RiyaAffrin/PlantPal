@@ -19,14 +19,18 @@ struct MeView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(plants) { plant in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(plant.name)
-                                    .font(.headline)
-                                Text("\(plant.type) · \(plant.location)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                            NavigationLink {
+                                ReviewPlanView(plantName: plant.name)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(plant.name)
+                                        .font(.headline)
+                                    Text("\(plant.type) · \(plant.location)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
                             }
-                            .padding(.vertical, 4)
                         }
                     }
                 }

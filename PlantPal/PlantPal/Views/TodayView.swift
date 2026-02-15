@@ -45,11 +45,6 @@ struct TodayView: View {
                 }
             }
             .navigationTitle("Care Today")
-            .toolbar {
-                NavigationLink("Review Plan") {
-                    ReviewPlanView()
-                }
-            }
         }
     }
 
@@ -59,19 +54,33 @@ struct TodayView: View {
 }
 
 struct ReviewPlanView: View {
-    @Environment(\.dismiss) private var dismiss
+    let plantName: String?
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @StateObject private var googleAuth = GoogleAuthManager()
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
 
+    init(plantName: String? = nil) {
+        self.plantName = plantName
+    }
+
     private var activePlantName: String {
-        profiles.first?.name ?? tasks.first?.plantName ?? "My Plant"
+        if let plantName, !plantName.isEmpty {
+            return plantName
+        }
+        return profiles.first?.name ?? tasks.first?.plantName ?? "My Plant"
     }
 
     private var activeTasks: [CareTask] {
-        tasks.filter { $0.plantName == activePlantName }
+        tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(activePlantName) == .orderedSame }
+    }
+
+    private var sourceTasks: [CareTask] {
+        if let plantName, !plantName.isEmpty {
+            return activeTasks
+        }
+        return activeTasks.isEmpty ? tasks : activeTasks
     }
 
     var body: some View {
@@ -116,17 +125,11 @@ struct ReviewPlanView: View {
                 Text("Only plant-care events are synced.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                Button("Back") {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
-                .frame(maxWidth: .infinity)
             }
             .padding()
         }
-        .navigationBarBackButtonHidden()
+        .navigationTitle(activePlantName)
+        .navigationBarTitleDisplayMode(.inline)
         .alert("Calendar Sync", isPresented: $showSyncAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -146,7 +149,6 @@ struct ReviewPlanView: View {
                 return
             }
 
-            let sourceTasks = activeTasks.isEmpty ? tasks : activeTasks
             let plan = sourceTasks.prefix(20).map { task in
                 CalendarPlanItem(
                     title: task.title,
@@ -167,7 +169,6 @@ struct ReviewPlanView: View {
     }
 
     private func matchingTasks(_ keyword: String) -> [CareTask] {
-        let sourceTasks = activeTasks.isEmpty ? tasks : activeTasks
         return sourceTasks
             .filter { $0.title.lowercased().contains(keyword) }
             .sorted { $0.dueDate < $1.dueDate }
