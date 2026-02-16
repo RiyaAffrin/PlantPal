@@ -4,7 +4,6 @@ import SwiftData
 struct Scenario1FlowView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
-    @Query(sort: \CareTask.createdAt, order: .forward) private var allTasks: [CareTask]
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
     @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
 
@@ -17,6 +16,7 @@ struct Scenario1FlowView: View {
     @State private var setupStep: SetupStep = .awaitingIntent
     @State private var isSending = false
     @State private var errorMessage: String?
+    @State private var pendingPlan: PendingCarePlan?
 
     var body: some View {
         NavigationStack {
@@ -71,6 +71,9 @@ struct Scenario1FlowView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .navigationDestination(item: $pendingPlan) { plan in
+                ReviewPlanView(plantName: plan.plantName, draftPlan: plan)
             }
         }
     }
@@ -200,13 +203,20 @@ struct Scenario1FlowView: View {
             city: city,
             frequencyDays: frequency
         )
-        replaceTasks(for: name, with: scheduleResult.tasks)
+        let pendingTasks = scheduleResult.tasks.map {
+            PendingCareTask(title: $0.title, notes: $0.notes, dueDate: $0.dueDate)
+        }
+        pendingPlan = PendingCarePlan(
+            plantName: name,
+            tasks: pendingTasks,
+            explanation: scheduleResult.explanation
+        )
 
-        addAssistantMessage("Done. Schedule created for \(name).", plantName: name)
+        addAssistantMessage("Done. I created a default plan for \(name).", plantName: name)
         if let explanation = scheduleResult.explanation, !explanation.isEmpty {
             addAssistantMessage(explanation, plantName: name)
         }
-        addAssistantMessage("Check it in Today.", plantName: name)
+        addAssistantMessage("Please review and apply the plan first. It will appear in Care Today after you apply.", plantName: name)
     }
 
     private func generatedTasksFromGemini(
@@ -289,12 +299,6 @@ struct Scenario1FlowView: View {
         guard offsets.count >= 2 else { return nil }
         let interval = offsets[1] - offsets[0]
         return interval > 0 ? interval : nil
-    }
-
-    private func replaceTasks(for plantName: String, with tasks: [CareTask]) {
-        let existing = allTasks.filter { $0.plantName == plantName }
-        existing.forEach { modelContext.delete($0) }
-        tasks.forEach { modelContext.insert($0) }
     }
 
     private func upsertSummary(for plantName: String, line: String) {

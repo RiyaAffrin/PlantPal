@@ -96,6 +96,20 @@ struct ReminderItem: Identifiable, Hashable {
     var isCompleted: Bool
 }
 
+struct PendingCareTask: Identifiable, Hashable {
+    let id = UUID()
+    var title: String
+    var notes: String
+    var dueDate: Date
+}
+
+struct PendingCarePlan: Identifiable, Hashable {
+    let id = UUID()
+    var plantName: String
+    var tasks: [PendingCareTask]
+    var explanation: String?
+}
+
 extension Date {
     static func daysFromNow(_ days: Int) -> Date {
         Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()

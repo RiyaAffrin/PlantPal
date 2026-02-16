@@ -54,33 +54,52 @@ struct TodayView: View {
 }
 
 struct ReviewPlanView: View {
+    @Environment(\.modelContext) private var modelContext
     let plantName: String?
+    let draftPlan: PendingCarePlan?
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
-    @StateObject private var googleAuth = GoogleAuthManager()
+    @State private var isDemoAuthorized = false
+    @State private var showAuthSheet = false
+    @State private var isApplying = false
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
 
-    init(plantName: String? = nil) {
+    init(plantName: String? = nil, draftPlan: PendingCarePlan? = nil) {
         self.plantName = plantName
+        self.draftPlan = draftPlan
     }
 
     private var activePlantName: String {
+        if let draftPlan {
+            return draftPlan.plantName
+        }
         if let plantName, !plantName.isEmpty {
             return plantName
         }
         return profiles.first?.name ?? tasks.first?.plantName ?? "My Plant"
     }
 
-    private var activeTasks: [CareTask] {
-        tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(activePlantName) == .orderedSame }
+    private var activeTasks: [PendingCareTask] {
+        if let draftPlan {
+            return draftPlan.tasks
+        }
+        return tasks
+            .filter { $0.plantName.localizedCaseInsensitiveCompare(activePlantName) == .orderedSame }
+            .map { PendingCareTask(title: $0.title, notes: $0.notes, dueDate: $0.dueDate) }
     }
 
-    private var sourceTasks: [CareTask] {
+    private var sourceTasks: [PendingCareTask] {
+        if draftPlan != nil {
+            return activeTasks
+        }
         if let plantName, !plantName.isEmpty {
             return activeTasks
         }
-        return activeTasks.isEmpty ? tasks : activeTasks
+        if activeTasks.isEmpty {
+            return tasks.map { PendingCareTask(title: $0.title, notes: $0.notes, dueDate: $0.dueDate) }
+        }
+        return activeTasks
     }
 
     var body: some View {
@@ -115,60 +134,94 @@ struct ReviewPlanView: View {
                     tipText: tipText(for: "soil", fallback: "Only water if top soil feels dry.")
                 )
 
-                Button("Sync to Google Calendar") {
-                    syncToGoogleCalendar()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .frame(maxWidth: .infinity)
+                if draftPlan != nil {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(isDemoAuthorized ? "Google Calendar authorized (Demo)." : "Google Calendar not authorized yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
-                Text("Only plant-care events are synced.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        Button(isDemoAuthorized ? "Re-open Demo Authorization" : "Authorize Google Calendar (Demo)") {
+                            showAuthSheet = true
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(isApplying ? "Applying..." : "Apply Plan (Add to Care Today + Push to Calendar)") {
+                            applyDraftPlan()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .frame(maxWidth: .infinity)
+                        .disabled(!isDemoAuthorized || isApplying || sourceTasks.isEmpty)
+
+                        Text("For walkthrough mode, calendar push is simulated after demo authorization.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button("Sync to Google Calendar (Demo)") {
+                        syncToGoogleCalendarDemo()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .frame(maxWidth: .infinity)
+
+                    Text("Only plant-care events are synced. Demo mode does not call Google APIs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
         }
         .navigationTitle(activePlantName)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showAuthSheet) {
+            DemoGoogleAuthorizationView(isAuthorized: $isDemoAuthorized)
+        }
         .alert("Calendar Sync", isPresented: $showSyncAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(syncStatusMessage)
         }
-        .onReceive(googleAuth.$errorMessage) { message in
-            guard let message, !message.isEmpty else { return }
-            syncStatusMessage = message
-            showSyncAlert = true
-        }
     }
 
-    private func syncToGoogleCalendar() {
-        Task {
-            await googleAuth.signIn()
-            guard googleAuth.isSignedIn, let token = googleAuth.accessToken else {
-                return
-            }
+    private func syncToGoogleCalendarDemo() {
+        let count = min(20, sourceTasks.count)
+        syncStatusMessage = "Demo mode: simulated sync of \(count) care events to Google Calendar."
+        showSyncAlert = true
+    }
 
-            let plan = sourceTasks.prefix(20).map { task in
-                CalendarPlanItem(
+    private func applyDraftPlan() {
+        guard let draftPlan else { return }
+        guard isDemoAuthorized else {
+            syncStatusMessage = "Please complete Demo Authorization first."
+            showSyncAlert = true
+            return
+        }
+
+        isApplying = true
+        replaceTasks(for: draftPlan.plantName, with: draftPlan.tasks)
+        syncStatusMessage = "Applied plan for \(draftPlan.plantName). Added \(draftPlan.tasks.count) tasks to Care Today and simulated Google Calendar push."
+        showSyncAlert = true
+        isApplying = false
+    }
+
+    private func replaceTasks(for plantName: String, with pendingTasks: [PendingCareTask]) {
+        let existing = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
+        existing.forEach { modelContext.delete($0) }
+
+        pendingTasks.forEach { task in
+            modelContext.insert(
+                CareTask(
+                    plantName: plantName,
                     title: task.title,
-                    guidance: task.notes,
-                    rrule: "FREQ=WEEKLY;INTERVAL=1",
-                    startDate: task.dueDate
+                    notes: task.notes,
+                    dueDate: task.dueDate
                 )
-            }
-
-            do {
-                try await GoogleCalendarService().createEvents(from: plan, accessToken: token)
-                syncStatusMessage = "Synced \(plan.count) care events to Google Calendar."
-            } catch {
-                syncStatusMessage = error.localizedDescription
-            }
-            showSyncAlert = true
+            )
         }
     }
 
-    private func matchingTasks(_ keyword: String) -> [CareTask] {
+    private func matchingTasks(_ keyword: String) -> [PendingCareTask] {
         return sourceTasks
             .filter { $0.title.lowercased().contains(keyword) }
             .sorted { $0.dueDate < $1.dueDate }
@@ -203,6 +256,43 @@ struct ReviewPlanView: View {
         if count >= 3 { return "High" }
         if count >= 2 { return "Medium" }
         return "Medium"
+    }
+}
+
+private struct DemoGoogleAuthorizationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var isAuthorized: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Google Calendar Authorization")
+                    .font(.title2.weight(.semibold))
+
+                Text("Walkthrough mode: this page simulates a successful Google authorization flow.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Text(isAuthorized ? "Status: Authorized (Demo)" : "Status: Not authorized")
+                    .font(.subheadline)
+
+                Button(isAuthorized ? "Keep Authorized" : "Authorize (Demo)") {
+                    isAuthorized = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Authorize")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
