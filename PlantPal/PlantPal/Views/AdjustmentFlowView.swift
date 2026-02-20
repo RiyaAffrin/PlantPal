@@ -2,12 +2,18 @@ import SwiftUI
 import SwiftData
 
 struct MeView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var plants: [PlantProfile]
+    @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
+    @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
+    @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
+    @Query(sort: \CareTask.createdAt, order: .forward) private var allTasks: [CareTask]
     @StateObject private var googleAuth = GoogleAuthManager()
     @State private var geminiAlertMessage = ""
     @State private var showGeminiAlert = false
     @State private var calendarStatusMessage: String?
     @State private var showCalendarAlert = false
+    @State private var plantToDelete: PlantProfile?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +36,13 @@ struct MeView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 4)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    plantToDelete = plant
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -74,6 +87,22 @@ struct MeView: View {
         } message: {
             Text(calendarStatusMessage ?? "")
         }
+        .alert("Delete Plant", isPresented: Binding(
+            get: { plantToDelete != nil },
+            set: { if !$0 { plantToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { plantToDelete = nil }
+            Button("Delete", role: .destructive) {
+                if let plant = plantToDelete {
+                    deletePlantAndRelatedData(plant)
+                    plantToDelete = nil
+                }
+            }
+        } message: {
+            if let plant = plantToDelete {
+                Text("Remove \"\(plant.name)\" and all its chat history, memories, and care tasks? This cannot be undone.")
+            }
+        }
         .onReceive(googleAuth.$errorMessage) { message in
             guard let message, !message.isEmpty else { return }
             calendarStatusMessage = message
@@ -87,6 +116,15 @@ struct MeView: View {
 }
 
 private extension MeView {
+    func deletePlantAndRelatedData(_ plant: PlantProfile) {
+        let name = plant.name
+        modelContext.delete(plant)
+        messages.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+        summaries.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+        memories.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+        allTasks.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+    }
+
     func connectGemini() {
         let apiKey = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
         if let apiKey, !apiKey.isEmpty, !apiKey.hasPrefix("<#") {

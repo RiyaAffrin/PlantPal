@@ -15,6 +15,7 @@ struct ChatView: View {
     @State private var isInConversation = false
     @State private var isSending = false
     @State private var errorMessage: String?
+    @State private var threadToDelete: ChatThread?
 
     private var availablePlantNames: [String] {
         let profileNames = profiles.map(\.name)
@@ -83,6 +84,26 @@ struct ChatView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .alert("Delete Chat", isPresented: Binding(
+                get: { threadToDelete != nil },
+                set: { if !$0 { threadToDelete = nil } }
+            )) {
+                Button("Cancel", role: .cancel) { threadToDelete = nil }
+                Button("Delete", role: .destructive) {
+                    if let thread = threadToDelete {
+                        deleteAllDataForPlant(thread.plantName)
+                        if isInConversation && selectedPlantName == thread.plantName {
+                            isInConversation = false
+                            selectedPlantName = availablePlantNames.first ?? "PlantPal"
+                        }
+                        threadToDelete = nil
+                    }
+                }
+            } message: {
+                if let thread = threadToDelete {
+                    Text("Delete all chat history for \(thread.plantName)? This cannot be undone.")
+                }
+            }
         }
     }
 
@@ -129,6 +150,13 @@ struct ChatView: View {
                             .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                threadToDelete = thread
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -419,15 +447,19 @@ struct ChatView: View {
         modelContext.insert(message)
     }
 
-    private func resetPlant() {
-        let targetPlant = selectedPlantName
-        if let profile = activeProfile {
+    private func deleteAllDataForPlant(_ plantName: String) {
+        if let profile = profiles.first(where: { $0.name == plantName }) {
             modelContext.delete(profile)
         }
-        messages.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
-        summaries.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
-        memories.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
-        allTasks.filter { $0.plantName == targetPlant }.forEach { modelContext.delete($0) }
+        messages.filter { $0.plantName == plantName }.forEach { modelContext.delete($0) }
+        summaries.filter { $0.plantName == plantName }.forEach { modelContext.delete($0) }
+        memories.filter { $0.plantName == plantName }.forEach { modelContext.delete($0) }
+        allTasks.filter { $0.plantName == plantName }.forEach { modelContext.delete($0) }
+    }
+
+    private func resetPlant() {
+        let targetPlant = selectedPlantName
+        deleteAllDataForPlant(targetPlant)
         selectedPlantName = "PlantPal"
         addAgentMessage("Hi, I am PlantPal. What plant are you caring for?")
         setupStep = .askPlantName
