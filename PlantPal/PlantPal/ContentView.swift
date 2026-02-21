@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 0
+    @State private var chatResetTrigger = 0
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -9,11 +10,14 @@ struct ContentView: View {
                 .tabItem { Label("Today", systemImage: "leaf.fill") }
                 .tag(0)
 
-            Scenario1FlowView()
+            Scenario1FlowView(resetTrigger: $chatResetTrigger)
                 .tabItem { Label("Chat", systemImage: "sparkles") }
                 .tag(1)
 
-            ChatView(onStartChat: { selectedTab = 1 })
+            ChatView(onStartChat: {
+                selectedTab = 1
+                chatResetTrigger += 1
+            })
                 .tabItem { Label("History", systemImage: "bubble.left.and.bubble.right") }
                 .tag(2)
 

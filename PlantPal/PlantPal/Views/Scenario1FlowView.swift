@@ -2,6 +2,9 @@ import SwiftUI
 import SwiftData
 
 struct Scenario1FlowView: View {
+    // incremented by ContentView when History's "Start a chat" is tapped
+    var resetTrigger: Binding<Int>? = nil
+
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
@@ -83,6 +86,15 @@ struct Scenario1FlowView: View {
             }
             .navigationTitle(agentName)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if chatMessages.count > 2 || setupStep != .awaitingIntent {
+                        Button("New Chat") {
+                            resetToInitialState()
+                        }
+                    }
+                }
+            }
             .alert(
                 "Error",
                 isPresented: Binding(
@@ -105,6 +117,10 @@ struct Scenario1FlowView: View {
                 if oldCount > 0 && newCount == 0 {
                     resetToInitialState()
                 }
+            }
+            .onChange(of: resetTrigger?.wrappedValue ?? 0) { _, _ in
+                // triggered when History's "Start a chat" is tapped
+                resetToInitialState()
             }
         }
     }

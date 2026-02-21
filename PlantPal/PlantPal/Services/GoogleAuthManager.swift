@@ -9,6 +9,19 @@ final class GoogleAuthManager: ObservableObject {
     @Published var accessToken: String?
     @Published var errorMessage: String?
 
+    init() {
+        // try to restore the previous session so users don't have to sign in every time
+        Task { await restorePreviousSignIn() }
+    }
+
+    func restorePreviousSignIn() async {
+        do {
+            let user = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
+            accessToken = user.accessToken.tokenString
+            isSignedIn = true
+        } catch {}
+    }
+
     func signIn() async {
         errorMessage = nil
 

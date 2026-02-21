@@ -8,7 +8,7 @@ struct MeView: View {
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
     @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
     @Query(sort: \CareTask.createdAt, order: .forward) private var allTasks: [CareTask]
-    @StateObject private var googleAuth = GoogleAuthManager()
+    @EnvironmentObject private var googleAuth: GoogleAuthManager
     @State private var geminiAlertMessage = ""
     @State private var showGeminiAlert = false
     @State private var calendarStatusMessage: String?

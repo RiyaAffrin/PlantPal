@@ -25,13 +25,15 @@ struct GoogleCalendarService {
             let startDate = dateFormatter.string(from: item.startDate)
             let endDate = dateFormatter.string(from: Calendar.current.date(byAdding: .day, value: 1, to: item.startDate) ?? item.startDate)
 
-            let payload: [String: Any] = [
+            var payload: [String: Any] = [
                 "summary": item.title,
                 "description": item.guidance,
                 "start": ["date": startDate],
-                "end": ["date": endDate],
-                "recurrence": ["RRULE:\(item.rrule)"]
+                "end": ["date": endDate]
             ]
+            if let rrule = item.rrule {
+                payload["recurrence"] = ["RRULE:\(rrule)"]
+            }
 
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -47,6 +49,6 @@ struct CalendarPlanItem: Identifiable {
     let id = UUID()
     let title: String
     let guidance: String
-    let rrule: String
+    let rrule: String?   // nil = one-time event, non-nil = recurring
     let startDate: Date
 }

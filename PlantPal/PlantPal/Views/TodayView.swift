@@ -116,8 +116,7 @@ struct ReviewPlanView: View {
     let draftPlan: PendingCarePlan?
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
-    @State private var isDemoAuthorized = false
-    @State private var showAuthSheet = false
+    @EnvironmentObject private var googleAuth: GoogleAuthManager
     @State private var isApplying = false
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
@@ -193,26 +192,24 @@ struct ReviewPlanView: View {
 
                 if draftPlan != nil {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(isDemoAuthorized ? "Google Calendar authorized (Demo)." : "Google Calendar not authorized yet.")
+                        Text(googleAuth.isSignedIn ? "Connected to Google Calendar." : "Not connected to Google Calendar yet.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        Button(isDemoAuthorized ? "Re-open Demo Authorization" : "Authorize Google Calendar (Demo)") {
-                            showAuthSheet = true
+                        if !googleAuth.isSignedIn {
+                            Button("Connect to Google Calendar") {
+                                Task { await googleAuth.signIn() }
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
 
-                        Button(isApplying ? "Applying..." : "Apply Plan (Add to Care Today + Push to Calendar)") {
-                            applyDraftPlan()
+                        Button(isApplying ? "Applying..." : "Apply Plan") {
+                            Task { await applyDraftPlan() }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
                         .frame(maxWidth: .infinity)
-                        .disabled(!isDemoAuthorized || isApplying || sourceTasks.isEmpty)
-
-                        Text("For walkthrough mode, calendar push is simulated after demo authorization.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .disabled(!googleAuth.isSignedIn || isApplying || sourceTasks.isEmpty)
                     }
                 } else {
                     Button("Sync to Google Calendar (Demo)") {
@@ -231,13 +228,15 @@ struct ReviewPlanView: View {
         }
         .navigationTitle(activePlantName)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showAuthSheet) {
-            DemoGoogleAuthorizationView(isAuthorized: $isDemoAuthorized)
-        }
         .alert("Calendar Sync", isPresented: $showSyncAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(syncStatusMessage)
+        }
+        .onReceive(googleAuth.$errorMessage) { message in
+            guard let message, !message.isEmpty else { return }
+            syncStatusMessage = message
+            showSyncAlert = true
         }
     }
 
@@ -247,17 +246,30 @@ struct ReviewPlanView: View {
         showSyncAlert = true
     }
 
-    private func applyDraftPlan() {
-        guard let draftPlan else { return }
-        guard isDemoAuthorized else {
-            syncStatusMessage = "Please complete Demo Authorization first."
-            showSyncAlert = true
-            return
+    private func applyDraftPlan() async {
+        guard let draftPlan, let token = googleAuth.accessToken else { return }
+        isApplying = true
+
+        // save to SwiftData first
+        replaceTasks(for: draftPlan.plantName, with: draftPlan.tasks)
+
+        // push each task as a one-time event to Google Calendar
+        let calendarItems = draftPlan.tasks.map { task in
+            CalendarPlanItem(
+                title: task.title,
+                guidance: task.notes,
+                rrule: nil,
+                startDate: task.dueDate
+            )
         }
 
-        isApplying = true
-        replaceTasks(for: draftPlan.plantName, with: draftPlan.tasks)
-        syncStatusMessage = "Applied plan for \(draftPlan.plantName). Added \(draftPlan.tasks.count) tasks to Care Today and simulated Google Calendar push."
+        do {
+            try await GoogleCalendarService().createEvents(from: calendarItems, accessToken: token)
+            syncStatusMessage = "Plan applied and \(calendarItems.count) events added to Google Calendar."
+        } catch {
+            syncStatusMessage = "Plan saved locally, but calendar sync failed: \(error.localizedDescription)"
+        }
+
         showSyncAlert = true
         isApplying = false
     }
@@ -313,43 +325,6 @@ struct ReviewPlanView: View {
         if count >= 3 { return "High" }
         if count >= 2 { return "Medium" }
         return "Medium"
-    }
-}
-
-private struct DemoGoogleAuthorizationView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var isAuthorized: Bool
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Google Calendar Authorization")
-                    .font(.title2.weight(.semibold))
-
-                Text("Walkthrough mode: this page simulates a successful Google authorization flow.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                Text(isAuthorized ? "Status: Authorized (Demo)" : "Status: Not authorized")
-                    .font(.subheadline)
-
-                Button(isAuthorized ? "Keep Authorized" : "Authorize (Demo)") {
-                    isAuthorized = true
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Authorize")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
     }
 }
 
