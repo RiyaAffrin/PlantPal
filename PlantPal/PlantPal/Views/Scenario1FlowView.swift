@@ -6,6 +6,7 @@ struct Scenario1FlowView: View {
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
     @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
+    @Query(sort: \CareTask.dueDate, order: .forward) private var allTasks: [CareTask]
 
     @State private var agentName = "PlantPal"
     @State private var chatMessages: [SetupMessage] = [
@@ -17,6 +18,9 @@ struct Scenario1FlowView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
     @State private var pendingPlan: PendingCarePlan?
+    @State private var pendingAdjustmentDraft: PendingPlanAdjustment?
+    @State private var adjustmentPreview: PendingPlanAdjustment?
+    @State private var adjustmentIntake: AdjustmentIntake?
 
     var body: some View {
         NavigationStack {
@@ -41,12 +45,30 @@ struct Scenario1FlowView: View {
                             }
                             .frame(maxWidth: 340)
                         }
+
+                        if let options = optionsForCurrentStep {
+                            OptionCard(options: options) { selected in
+                                inputText = selected
+                                handleSend()
+                            }
+                            .frame(maxWidth: 340)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
 
                 Divider()
+
+                if pendingAdjustmentDraft != nil {
+                    Button("Preview Changes") {
+                        adjustmentPreview = pendingAdjustmentDraft
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                }
 
                 HStack(spacing: 12) {
                     TextField("Type your answer", text: $inputText, axis: .vertical)
@@ -74,6 +96,9 @@ struct Scenario1FlowView: View {
             }
             .navigationDestination(item: $pendingPlan) { plan in
                 ReviewPlanView(plantName: plan.plantName, draftPlan: plan)
+            }
+            .navigationDestination(item: $adjustmentPreview) { plan in
+                AdjustPlanPreviewView(draft: plan)
             }
         }
     }
@@ -140,6 +165,122 @@ struct Scenario1FlowView: View {
                 setupStep = .awaitingIntent
                 isSending = false
             }
+        case .adjustAskPlantName:
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            let plantName = normalizedPlantName(from: trimmed) ?? trimmed
+            adjustmentIntake = AdjustmentIntake(plantName: plantName)
+            addAssistantMessage("Got it. Do you need a short-term change or a long-term change?", plantName: plantName)
+            if let context = adjustmentContext(for: plantName) {
+                addAssistantMessage(context, plantName: plantName)
+            }
+            setupStep = .adjustAskChangeType(plantName: plantName)
+            isSending = false
+        case .adjustAskChangeType(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            let lower = trimmed.lowercased()
+            if lower.contains("short") {
+                updateAdjustmentIntake {
+                    $0.plantName = plantName
+                    $0.changeType = .shortTerm
+                }
+                addAssistantMessage("What date range should I account for? (example: Jan 28 to Feb 3)", plantName: plantName)
+                setupStep = .adjustAskDateRange(plantName: plantName)
+            } else if lower.contains("long") || lower.contains("permanent") {
+                updateAdjustmentIntake {
+                    $0.plantName = plantName
+                    $0.changeType = .longTerm
+                }
+                addAssistantMessage("What permanent update do you want? (example: water less often, from every 5 days to every 7 days)", plantName: plantName)
+                setupStep = .adjustAskLongTermGoal(plantName: plantName)
+            } else {
+                addAssistantMessage("Please pick one: short-term or long-term.", plantName: plantName)
+            }
+            isSending = false
+        case .adjustAskDateRange(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            guard let range = parseDateRange(from: trimmed) else {
+                addAssistantMessage("I couldn't parse that date range. Try something like Jan 28 to Feb 3.", plantName: plantName)
+                isSending = false
+                return
+            }
+            updateAdjustmentIntake {
+                $0.plantName = plantName
+                $0.dateRangeText = trimmed
+                $0.awayStart = range.start
+                $0.awayEnd = range.end
+            }
+            addAssistantMessage("Will anyone be able to water or check your plant while you're away?", plantName: plantName)
+            setupStep = .adjustAskHelperAvailability(plantName: plantName)
+            isSending = false
+        case .adjustAskHelperAvailability(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            let lower = trimmed.lowercased()
+            if lower.contains("yes") {
+                updateAdjustmentIntake { $0.helperAvailable = true }
+            } else if lower.contains("no") {
+                updateAdjustmentIntake { $0.helperAvailable = false }
+            } else {
+                addAssistantMessage("Please answer yes or no.", plantName: plantName)
+                isSending = false
+                return
+            }
+            addAssistantMessage("How hands-on do you want the plan to be? (Conservative / Balanced / Hands-off)", plantName: plantName)
+            setupStep = .adjustAskPlanStyle(plantName: plantName)
+            isSending = false
+        case .adjustAskPlanStyle(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            let lower = trimmed.lowercased()
+            if lower.contains("conservative") {
+                updateAdjustmentIntake { $0.style = .conservative }
+            } else if lower.contains("balanced") {
+                updateAdjustmentIntake { $0.style = .balanced }
+            } else if lower.contains("hands") {
+                updateAdjustmentIntake { $0.style = .handsOff }
+            } else {
+                addAssistantMessage("Please choose conservative, balanced, or hands-off.", plantName: plantName)
+                isSending = false
+                return
+            }
+            addAssistantMessage("Do you prefer watering earlier before you leave, or catching up after you return?", plantName: plantName)
+            setupStep = .adjustAskTimingPreference(plantName: plantName)
+            isSending = false
+        case .adjustAskTimingPreference(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            let lower = trimmed.lowercased()
+            if lower.contains("earlier") || lower.contains("before") {
+                updateAdjustmentIntake { $0.preferEarly = true }
+            } else if lower.contains("catch") || lower.contains("after") {
+                updateAdjustmentIntake { $0.preferEarly = false }
+            } else {
+                addAssistantMessage("Please choose one: earlier before leaving, or catch up after returning.", plantName: plantName)
+                isSending = false
+                return
+            }
+            finalizeAdjustment(for: plantName)
+            isSending = false
+        case .adjustAskLongTermGoal(let plantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
+            updateAdjustmentIntake {
+                $0.longTermGoal = trimmed
+                $0.style = .balanced
+                $0.preferEarly = false
+            }
+            finalizeAdjustment(for: plantName)
+            isSending = false
+        case .adjustReadyForPreview:
+            if trimmed.lowercased().contains("preview"), let draft = pendingAdjustmentDraft {
+                adjustmentPreview = draft
+            } else {
+                addAssistantMessage("You can tap Preview Changes, or tell me another constraint and I can regenerate.", plantName: adjustmentIntake?.plantName ?? "PlantPal")
+            }
+            isSending = false
         }
     }
 
@@ -152,18 +293,34 @@ struct Scenario1FlowView: View {
 
         let lower = text.lowercased()
         if lower.contains("setup") || lower.contains("set up") {
+            pendingAdjustmentDraft = nil
+            adjustmentPreview = nil
             addAssistantMessage("Sure. What plant are you caring for?", plantName: "PlantPal")
             setupStep = .collectPlantName
             return
         }
         if lower.contains("question") {
+            pendingAdjustmentDraft = nil
+            adjustmentPreview = nil
             addAssistantMessage("Sure. Which plant is this about?", plantName: "PlantPal")
             setupStep = .collectPlantName
             return
         }
         if lower.contains("modify") {
-            addAssistantMessage("Okay. Which plant's plan should I modify?", plantName: "PlantPal")
-            setupStep = .collectPlantName
+            pendingAdjustmentDraft = nil
+            adjustmentPreview = nil
+            if let plantName = suggestedPlantForAdjustment() {
+                adjustmentIntake = AdjustmentIntake(plantName: plantName)
+                addAssistantMessage("Great. I can modify \(plantName)'s current care plan.", plantName: plantName)
+                if let context = adjustmentContext(for: plantName) {
+                    addAssistantMessage(context, plantName: plantName)
+                }
+                addAssistantMessage("What would you like to change today? Short-term or long-term?", plantName: plantName)
+                setupStep = .adjustAskChangeType(plantName: plantName)
+            } else {
+                addAssistantMessage("Okay. Which plant's plan should I modify?", plantName: "PlantPal")
+                setupStep = .adjustAskPlantName
+            }
             return
         }
 
@@ -346,9 +503,291 @@ struct Scenario1FlowView: View {
         chatMessages.last?.role == .assistant && chatMessages.last?.text == "How can I help you today?"
     }
 
+    private var optionsForCurrentStep: [String]? {
+        switch setupStep {
+        case .adjustAskChangeType:
+            return [
+                "Short-term change (for a specific period)",
+                "Long-term change (a permanent update)"
+            ]
+        case .adjustAskHelperAvailability:
+            return ["Yes", "No"]
+        case .adjustAskPlanStyle:
+            return [
+                "Conservative (avoid underwater)",
+                "Balanced",
+                "Hands-off (minimal actions)"
+            ]
+        case .adjustAskTimingPreference:
+            return [
+                "Water earlier before I leave",
+                "Catch up after I return"
+            ]
+        default:
+            return nil
+        }
+    }
+
     private func persistMessage(role: String, content: String, plantName: String) {
         let message = ChatMessage(role: role, content: content, plantName: plantName)
         modelContext.insert(message)
+    }
+
+    private func suggestedPlantForAdjustment() -> String? {
+        if profiles.count == 1 {
+            return profiles.first?.name
+        }
+        if let fromMemory = memories.first?.plantName {
+            return fromMemory
+        }
+        if let fromSummary = summaries.first?.plantName {
+            return fromSummary
+        }
+        return nil
+    }
+
+    private func normalizedPlantName(from raw: String) -> String? {
+        profiles.first(where: { $0.name.caseInsensitiveCompare(raw) == .orderedSame })?.name
+    }
+
+    private func adjustmentContext(for plantName: String) -> String? {
+        var context: [String] = []
+        if let profile = profiles.first(where: { $0.name.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            context.append("Saved setup: \(profile.type), kept at \(profile.location).")
+        }
+        if let memory = memories.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }),
+           let freq = memory.wateringFrequencyDays {
+            context.append("Recent preference: watering every \(freq) day(s).")
+        }
+        if let summary = summaries.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            let firstLine = summary.summary.split(separator: "\n").first.map(String.init) ?? summary.summary
+            if !firstLine.isEmpty {
+                context.append("From chat history: \(firstLine)")
+            }
+        }
+        guard !context.isEmpty else { return nil }
+        return "I'll use your saved setup + chat memory so we can skip repeated questions.\n" + context.joined(separator: " ")
+    }
+
+    private func updateAdjustmentIntake(_ update: (inout AdjustmentIntake) -> Void) {
+        var intake = adjustmentIntake ?? AdjustmentIntake(plantName: suggestedPlantForAdjustment() ?? "My Plant")
+        update(&intake)
+        adjustmentIntake = intake
+    }
+
+    private func finalizeAdjustment(for plantName: String) {
+        guard var intake = adjustmentIntake else {
+            addAssistantMessage("I couldn't collect enough information. Please try again.", plantName: plantName)
+            return
+        }
+        intake.plantName = plantName
+        adjustmentIntake = intake
+
+        guard let draft = buildAdjustmentDraft(from: intake) else {
+            addAssistantMessage("I could not find a current schedule yet. Please set up a plan first, then try modify plan again.", plantName: plantName)
+            return
+        }
+
+        pendingAdjustmentDraft = draft
+        addAssistantMessage("I prepared a proposed schedule update for \(plantName). Tap Preview Changes to review it before applying.", plantName: plantName)
+        setupStep = .adjustReadyForPreview
+    }
+
+    private func buildAdjustmentDraft(from intake: AdjustmentIntake) -> PendingPlanAdjustment? {
+        let currentTasks = allTasks
+            .filter { $0.plantName.caseInsensitiveCompare(intake.plantName) == .orderedSame }
+            .sorted { $0.dueDate < $1.dueDate }
+            .map { PendingCareTask(title: $0.title, notes: $0.notes, dueDate: $0.dueDate) }
+
+        guard !currentTasks.isEmpty else { return nil }
+
+        switch intake.changeType {
+        case .shortTerm:
+            return buildShortTermDraft(from: intake, currentTasks: currentTasks)
+        case .longTerm:
+            return buildLongTermDraft(from: intake, currentTasks: currentTasks)
+        case .none:
+            return nil
+        }
+    }
+
+    private func buildShortTermDraft(from intake: AdjustmentIntake, currentTasks: [PendingCareTask]) -> PendingPlanAdjustment? {
+        guard let awayStart = intake.awayStart, let awayEnd = intake.awayEnd else { return nil }
+
+        var proposed = currentTasks
+        var changes: [PendingTaskChange] = []
+        let calendar = Calendar.current
+        let awayStartDay = calendar.startOfDay(for: awayStart)
+        let awayEndDay = calendar.startOfDay(for: awayEnd)
+        let dayBeforeAway = calendar.date(byAdding: .day, value: -1, to: awayStartDay) ?? awayStartDay
+        var resumeDay = calendar.date(byAdding: .day, value: 1, to: awayEndDay) ?? awayEndDay
+
+        let indicesInAway = proposed.indices.filter { idx in
+            let due = calendar.startOfDay(for: proposed[idx].dueDate)
+            return due >= awayStartDay && due <= awayEndDay
+        }
+
+        let preferEarly = intake.preferEarly ?? true
+        var movedEarlyIndex: Int?
+        if preferEarly {
+            movedEarlyIndex = indicesInAway.first(where: { proposed[$0].title.lowercased().contains("water") })
+            if let idx = movedEarlyIndex {
+                let original = proposed[idx]
+                let reason = "Moved watering earlier so the plant gets moisture before your trip."
+                proposed[idx] = adjustedTask(from: original, newDate: dayBeforeAway, reason: reason)
+                changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+            }
+        }
+
+        let spacing = spacingDays(for: intake.style ?? .balanced)
+        for idx in indicesInAway {
+            if preferEarly, idx == movedEarlyIndex { continue }
+            let original = proposed[idx]
+            let reason = "Paused while you are away and resumed after return."
+            proposed[idx] = adjustedTask(from: original, newDate: resumeDay, reason: reason)
+            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+            resumeDay = calendar.date(byAdding: .day, value: spacing, to: resumeDay) ?? resumeDay
+        }
+
+        proposed.sort { $0.dueDate < $1.dueDate }
+
+        let helperText = intake.helperAvailable == true
+            ? "Optional: ask your helper for one quick soil check during the trip."
+            : "Optional: if possible, add one mid-trip soil check reminder."
+
+        let summary = [
+            "Water once before your trip.",
+            "Pause reminders while you're away (\(dateText(awayStartDay)) - \(dateText(awayEndDay))).",
+            "Resume the regular schedule after you return."
+        ]
+
+        return PendingPlanAdjustment(
+            plantName: intake.plantName,
+            currentTasks: currentTasks,
+            proposedTasks: proposed,
+            strategySummary: summary,
+            optionalTip: helperText,
+            changes: changes
+        )
+    }
+
+    private func buildLongTermDraft(from intake: AdjustmentIntake, currentTasks: [PendingCareTask]) -> PendingPlanAdjustment? {
+        var proposed = currentTasks
+        var changes: [PendingTaskChange] = []
+
+        let desiredInterval = extractFrequencyDays(from: intake.longTermGoal ?? "") ?? 7
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var nextWaterDate = today
+
+        for idx in proposed.indices {
+            guard proposed[idx].title.lowercased().contains("water") else { continue }
+            let original = proposed[idx]
+            let reason = "Updated to your new long-term watering preference (every \(desiredInterval) days)."
+            proposed[idx] = adjustedTask(from: original, newDate: nextWaterDate, reason: reason)
+            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+            nextWaterDate = calendar.date(byAdding: .day, value: desiredInterval, to: nextWaterDate) ?? nextWaterDate
+        }
+
+        proposed.sort { $0.dueDate < $1.dueDate }
+
+        return PendingPlanAdjustment(
+            plantName: intake.plantName,
+            currentTasks: currentTasks,
+            proposedTasks: proposed,
+            strategySummary: [
+                "Adopt a permanent watering cadence of every \(desiredInterval) days.",
+                "Keep non-watering tasks as close to the existing routine as possible."
+            ],
+            optionalTip: "You can fine-tune this later after one or two check-ins.",
+            changes: changes
+        )
+    }
+
+    private func adjustedTask(from task: PendingCareTask, newDate: Date, reason: String) -> PendingCareTask {
+        let noteSuffix = task.notes.isEmpty ? "" : " "
+        return PendingCareTask(
+            title: task.title,
+            notes: task.notes + noteSuffix + "[Adjusted] \(reason)",
+            dueDate: newDate
+        )
+    }
+
+    private func spacingDays(for style: AdjustmentStyle) -> Int {
+        switch style {
+        case .conservative:
+            return 1
+        case .balanced:
+            return 1
+        case .handsOff:
+            return 2
+        }
+    }
+
+    private func parseDateRange(from text: String) -> (start: Date, end: Date)? {
+        let normalized = text
+            .replacingOccurrences(of: "–", with: "-")
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: " to ", with: "-")
+            .replacingOccurrences(of: " to", with: "-")
+            .replacingOccurrences(of: "to ", with: "-")
+
+        let parts = normalized
+            .split(separator: "-", maxSplits: 1)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2 else { return nil }
+
+        guard let start = parseSingleDate(parts[0]), let end = parseSingleDate(parts[1]) else { return nil }
+
+        if end >= start {
+            return (start, end)
+        }
+        if let nextYearEnd = Calendar.current.date(byAdding: .year, value: 1, to: end), nextYearEnd >= start {
+            return (start, nextYearEnd)
+        }
+        return nil
+    }
+
+    private func parseSingleDate(_ text: String) -> Date? {
+        let formats = [
+            "MMM d yyyy", "MMMM d yyyy", "M/d/yyyy",
+            "MMM d", "MMMM d", "M/d"
+        ]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.isLenient = true
+
+        for format in formats {
+            formatter.dateFormat = format
+            if let parsed = formatter.date(from: text) {
+                if format.contains("yyyy") {
+                    return Calendar.current.startOfDay(for: parsed)
+                }
+                var comps = Calendar.current.dateComponents([.month, .day], from: parsed)
+                comps.year = Calendar.current.component(.year, from: Date())
+                if let date = Calendar.current.date(from: comps) {
+                    return Calendar.current.startOfDay(for: date)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func dateText(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    private func extractFrequencyDays(from text: String) -> Int? {
+        let lower = text.lowercased()
+        if lower.contains("daily") || lower.contains("every day") { return 1 }
+        if lower.contains("weekly") { return 7 }
+        if lower.contains("biweekly") { return 14 }
+        let numbers = lower.split { !$0.isNumber }
+        if let first = numbers.first, let value = Int(first) {
+            return max(1, value)
+        }
+        return nil
     }
 
     private func chatBubble(_ text: String, isAssistant: Bool) -> some View {
@@ -380,12 +819,43 @@ private enum SetupStep: Equatable {
     case collectCity(name: String, type: String, placement: String)
     case collectTemperature(name: String, type: String, placement: String, city: String)
     case collectCareGoal(name: String, type: String, placement: String, city: String, temperature: String)
+    case adjustAskPlantName
+    case adjustAskChangeType(plantName: String)
+    case adjustAskDateRange(plantName: String)
+    case adjustAskHelperAvailability(plantName: String)
+    case adjustAskPlanStyle(plantName: String)
+    case adjustAskTimingPreference(plantName: String)
+    case adjustAskLongTermGoal(plantName: String)
+    case adjustReadyForPreview
 }
 
 private enum SetupIntent: String, CaseIterable {
     case setupNewPlant = "Set up a new plant"
     case questionNewPlant = "Question about a new plant"
     case modifyCurrentPlan = "Modify current care plan"
+}
+
+private enum AdjustmentChangeType {
+    case shortTerm
+    case longTerm
+}
+
+private enum AdjustmentStyle {
+    case conservative
+    case balanced
+    case handsOff
+}
+
+private struct AdjustmentIntake {
+    var plantName: String
+    var changeType: AdjustmentChangeType?
+    var dateRangeText: String?
+    var awayStart: Date?
+    var awayEnd: Date?
+    var helperAvailable: Bool?
+    var style: AdjustmentStyle?
+    var preferEarly: Bool?
+    var longTermGoal: String?
 }
 
 private struct AgentBubble: View {

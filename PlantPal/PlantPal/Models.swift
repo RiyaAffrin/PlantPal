@@ -110,6 +110,23 @@ struct PendingCarePlan: Identifiable, Hashable {
     var explanation: String?
 }
 
+struct PendingTaskChange: Identifiable, Hashable {
+    let id = UUID()
+    var originalTask: PendingCareTask
+    var proposedTask: PendingCareTask
+    var reason: String
+}
+
+struct PendingPlanAdjustment: Identifiable, Hashable {
+    let id = UUID()
+    var plantName: String
+    var currentTasks: [PendingCareTask]
+    var proposedTasks: [PendingCareTask]
+    var strategySummary: [String]
+    var optionalTip: String?
+    var changes: [PendingTaskChange]
+}
+
 extension Date {
     static func daysFromNow(_ days: Int) -> Date {
         Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
