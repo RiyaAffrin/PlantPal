@@ -1,30 +1,25 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var selectedTab = 0
+
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                Color(.systemBackground)
-                    .ignoresSafeArea()
+        TabView(selection: $selectedTab) {
+            TodayView(selectedTab: $selectedTab)
+                .tabItem { Label("Today", systemImage: "leaf.fill") }
+                .tag(0)
 
-                TabView {
-                    HomeView()
-                        .tabItem { Label("Home", systemImage: "house") }
+            Scenario1FlowView()
+                .tabItem { Label("Chat", systemImage: "sparkles") }
+                .tag(1)
 
-                    Scenario1FlowView()
-                        .tabItem { Label("Setup", systemImage: "sparkles") }
+            ChatView(onStartChat: { selectedTab = 1 })
+                .tabItem { Label("History", systemImage: "bubble.left.and.bubble.right") }
+                .tag(2)
 
-                    ChatView()
-                        .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-
-                    TodayView()
-                        .tabItem { Label("Today", systemImage: "calendar") }
-
-                    MeView()
-                        .tabItem { Label("Me", systemImage: "person.crop.circle") }
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-            }
+            MeView()
+                .tabItem { Label("Me", systemImage: "person.crop.circle") }
+                .tag(3)
         }
     }
 }

@@ -48,6 +48,14 @@ struct MeView: View {
                     }
                 }
 
+                #if DEBUG
+                Section("Debug") {
+                    Button("Clear All Data", role: .destructive) {
+                        clearAllData()
+                    }
+                }
+                #endif
+
                 Section("Connections") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Connect to Gemini API to power your plant insights and chats.")
@@ -116,6 +124,14 @@ struct MeView: View {
 }
 
 private extension MeView {
+    func clearAllData() {
+        plants.forEach { modelContext.delete($0) }
+        messages.forEach { modelContext.delete($0) }
+        summaries.forEach { modelContext.delete($0) }
+        memories.forEach { modelContext.delete($0) }
+        allTasks.forEach { modelContext.delete($0) }
+    }
+
     func deletePlantAndRelatedData(_ plant: PlantProfile) {
         let name = plant.name
         modelContext.delete(plant)

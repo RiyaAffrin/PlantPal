@@ -100,7 +100,26 @@ struct Scenario1FlowView: View {
             .navigationDestination(item: $adjustmentPreview) { plan in
                 AdjustPlanPreviewView(draft: plan)
             }
+            .onChange(of: profiles.count) { oldCount, newCount in
+                // reset local chat state when all data gets cleared
+                if oldCount > 0 && newCount == 0 {
+                    resetToInitialState()
+                }
+            }
         }
+    }
+
+    private func resetToInitialState() {
+        chatMessages = [
+            SetupMessage(role: .assistant, text: "Hi, I'm PlantPal."),
+            SetupMessage(role: .assistant, text: "How can I help you today?")
+        ]
+        inputText = ""
+        setupStep = .awaitingIntent
+        pendingPlan = nil
+        pendingAdjustmentDraft = nil
+        adjustmentPreview = nil
+        adjustmentIntake = nil
     }
 
     private func handleSend() {

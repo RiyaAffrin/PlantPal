@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ChatView: View {
+    var onStartChat: () -> Void = {}
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
@@ -65,7 +66,7 @@ struct ChatView: View {
                     historyListView
                 }
             }
-            .navigationTitle("Chat")
+            .navigationTitle("History")
             .toolbar { chatToolbar }
             .onAppear {
                 if !availablePlantNames.contains(selectedPlantName) {
@@ -162,7 +163,7 @@ struct ChatView: View {
             }
 
             Button("Start a chat") {
-                startChat()
+                onStartChat()
             }
             .buttonStyle(.borderedProminent)
             .frame(maxWidth: .infinity)
@@ -234,17 +235,6 @@ struct ChatView: View {
 
     private func openConversation(for plantName: String) {
         selectedPlantName = plantName
-        refreshSetupStep()
-        isInConversation = true
-        seedIfNeeded()
-    }
-
-    private func startChat() {
-        if let first = availablePlantNames.first {
-            selectedPlantName = first
-        } else {
-            selectedPlantName = "PlantPal"
-        }
         refreshSetupStep()
         isInConversation = true
         seedIfNeeded()
@@ -569,7 +559,7 @@ struct MessageBubble: View {
 }
 
 #Preview {
-    ChatView()
+    ChatView(onStartChat: {})
         .modelContainer(for: [
             PlantProfile.self,
             ChatMessage.self,

@@ -2,6 +2,8 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
+    @Binding var selectedTab: Int
+    @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @State private var checkInSelection: String?
 
@@ -11,41 +13,96 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Today") {
-                    if todaysTasks.isEmpty {
-                        Text("No care tasks for today yet.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(todaysTasks) { task in
-                            ReminderCard(
-                                title: "\(task.title) (\(task.plantName))",
-                                dueDate: task.dueDate,
-                                notes: task.notes,
-                                isCompleted: task.isCompleted
-                            ) {
-                                toggleComplete(task)
-                            }
+            if profiles.isEmpty {
+                noPlantView
+            } else {
+                taskListView
+            }
+        }
+    }
+
+    // shown before any plant is set up — mirrors the old HomeView
+    private var noPlantView: some View {
+        VStack {
+            Spacer(minLength: 12)
+
+            Text("PlantPal")
+                .font(.system(size: 34, weight: .bold))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .background(Color(red: 0.86, green: 0.97, blue: 0.84))
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+
+            Text("We'll create a simple schedule you can follow.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+
+            Spacer()
+
+            Image(systemName: "leaf.fill")
+                .font(.system(size: 96))
+                .foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.32))
+                .padding(.vertical, 24)
+
+            Spacer()
+
+            Button("Start setup") {
+                selectedTab = 1
+            }
+            .font(.headline)
+            .frame(maxWidth: 240)
+            .padding(.vertical, 12)
+            .background(Color(red: 0.72, green: 0.95, blue: 0.63))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            Text("You can customize later.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 6)
+
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // shown once at least one plant exists
+    private var taskListView: some View {
+        List {
+            Section("Today") {
+                if todaysTasks.isEmpty {
+                    Text("No care tasks for today yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(todaysTasks) { task in
+                        ReminderCard(
+                            title: "\(task.title) (\(task.plantName))",
+                            dueDate: task.dueDate,
+                            notes: task.notes,
+                            isCompleted: task.isCompleted
+                        ) {
+                            toggleComplete(task)
                         }
                     }
                 }
+            }
 
-                Section("Check-in") {
-                    Text("How did your plant respond after the last watering?")
-                        .font(.subheadline)
-                    Button("It looks healthier") { checkInSelection = "It looks healthier" }
-                    Button("No change yet") { checkInSelection = "No change yet" }
-                    Button("Leaves look worse") { checkInSelection = "Leaves look worse" }
-                    if let checkInSelection {
-                        Text("Selected: \(checkInSelection)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            Section("Check-in") {
+                Text("How did your plant respond after the last watering?")
+                    .font(.subheadline)
+                Button("It looks healthier") { checkInSelection = "It looks healthier" }
+                Button("No change yet") { checkInSelection = "No change yet" }
+                Button("Leaves look worse") { checkInSelection = "Leaves look worse" }
+                if let checkInSelection {
+                    Text("Selected: \(checkInSelection)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Care Today")
         }
+        .navigationTitle("Care Today")
     }
 
     private func toggleComplete(_ task: CareTask) {
@@ -335,7 +392,7 @@ private struct PlanCardView: View {
 }
 
 #Preview {
-    TodayView()
+    TodayView(selectedTab: .constant(0))
         .modelContainer(for: [
             PlantProfile.self,
             ChatMessage.self,
