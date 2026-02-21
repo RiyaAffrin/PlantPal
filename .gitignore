@@ -1,4 +1,5 @@
 .DS_Store
-ios/PlantPal/Config/Secrets.xcconfig
+PlantPal/Config/Secrets.xcconfig
+PlantPal.xcodeproj/
 PlantPal/Config/Secrets.xcconfig
 PlantPal/PlantPal/Config/Secrets.xcconfig
