@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct Scenario1FlowView: View {
+    @Binding var selectedTab: Int
     // incremented by ContentView when History's "Start a chat" is tapped
     var resetTrigger: Binding<Int>? = nil
 
@@ -110,7 +111,7 @@ struct Scenario1FlowView: View {
                 ReviewPlanView(plantName: plan.plantName, draftPlan: plan)
             }
             .navigationDestination(item: $adjustmentPreview) { plan in
-                AdjustPlanPreviewView(draft: plan)
+                AdjustPlanPreviewView(selectedTab: $selectedTab, draft: plan)
             }
             .onChange(of: profiles.count) { oldCount, newCount in
                 // reset local chat state when all data gets cleared
@@ -297,8 +298,10 @@ struct Scenario1FlowView: View {
                 isSending = false
                 return
             }
-            finalizeAdjustment(for: plantName)
-            isSending = false
+            Task {
+                await finalizeAdjustment(for: plantName)
+                isSending = false
+            }
         case .adjustAskLongTermGoal(let plantName):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: plantName)
@@ -307,8 +310,10 @@ struct Scenario1FlowView: View {
                 $0.style = .balanced
                 $0.preferEarly = false
             }
-            finalizeAdjustment(for: plantName)
-            isSending = false
+            Task {
+                await finalizeAdjustment(for: plantName)
+                isSending = false
+            }
         case .adjustReadyForPreview:
             if trimmed.lowercased().contains("preview"), let draft = pendingAdjustmentDraft {
                 adjustmentPreview = draft
@@ -610,7 +615,7 @@ struct Scenario1FlowView: View {
         adjustmentIntake = intake
     }
 
-    private func finalizeAdjustment(for plantName: String) {
+    private func finalizeAdjustment(for plantName: String) async {
         guard var intake = adjustmentIntake else {
             addAssistantMessage("I couldn't collect enough information. Please try again.", plantName: plantName)
             return
@@ -618,14 +623,105 @@ struct Scenario1FlowView: View {
         intake.plantName = plantName
         adjustmentIntake = intake
 
-        guard let draft = buildAdjustmentDraft(from: intake) else {
+        guard var draft = buildAdjustmentDraft(from: intake) else {
             addAssistantMessage("I could not find a current schedule yet. Please set up a plan first, then try modify plan again.", plantName: plantName)
             return
+        }
+
+        addAssistantMessage("Let me think about the best plan for \(plantName)...", plantName: plantName)
+
+        let context = buildAIContext(for: plantName, intake: intake)
+        let gemini = GeminiService()
+
+        // generate "why" for each change
+        let cal = Calendar.current
+        var questionsList: [String] = []
+        for (i, change) in draft.changes.enumerated() {
+            let delayDays = cal.dateComponents([.day], from: change.originalTask.dueDate, to: change.proposedTask.dueDate).day ?? 0
+            let taskType = change.originalTask.title.lowercased()
+
+            let scienceQ: String
+            if taskType.contains("water") && delayDays < 0 {
+                scienceQ = "Pre-watering \(abs(delayDays)) day(s) before a dry period — how does deep watering help this species retain moisture in roots and soil?"
+            } else if taskType.contains("water") {
+                scienceQ = "Watering delayed \(delayDays) days — how does this species handle \(delayDays) days without water? Discuss drought tolerance, wilting thresholds, and root zone drying."
+            } else if taskType.contains("fertil") {
+                scienceQ = "Fertilization delayed \(delayDays) days — how long do nutrients remain bioavailable in soil? Does this species have high nutrient demands?"
+            } else if taskType.contains("rotat") || taskType.contains("turn") {
+                scienceQ = "Rotation delayed \(delayDays) days — how fast does phototropism cause leaning in this species? Is it reversible?"
+            } else if taskType.contains("prun") || taskType.contains("trim") {
+                scienceQ = "Pruning delayed \(delayDays) days — does timing matter for this species' growth phase? Any disease risk?"
+            } else if taskType.contains("mist") || taskType.contains("humid") {
+                scienceQ = "Misting delayed \(delayDays) days — how does this affect leaf transpiration and humidity needs for this species?"
+            } else if taskType.contains("check") || taskType.contains("inspect") || taskType.contains("soil") {
+                scienceQ = "Soil/leaf inspection delayed \(delayDays) days — what early signs of stress might be missed, and how resilient is this species over that gap?"
+            } else {
+                scienceQ = "\(change.originalTask.title) delayed \(delayDays) days — what is the biological impact on this species?"
+            }
+
+            questionsList.append("[\(i + 1)] \(change.originalTask.title) — \(scienceQ)")
+        }
+
+        do {
+            let explanations = try await gemini.generateBatchWhyExplanations(
+                context: context,
+                questions: questionsList
+            )
+            for (i, explanation) in explanations.enumerated() where i < draft.changes.count {
+                draft.changes[i].reason = explanation
+            }
+        } catch {
+            print("[PlantPal] Batch WHY generation failed: \(error.localizedDescription)")
         }
 
         pendingAdjustmentDraft = draft
         addAssistantMessage("I prepared a proposed schedule update for \(plantName). Tap Preview Changes to review it before applying.", plantName: plantName)
         setupStep = .adjustReadyForPreview
+    }
+
+    private func buildAIContext(for plantName: String, intake: AdjustmentIntake) -> String {
+        var parts: [String] = []
+        if let profile = profiles.first(where: { $0.name.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            parts.append("Plant: \(profile.name), type: \(profile.type), location: \(profile.location).")
+        }
+        if let memory = memories.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            if let freq = memory.wateringFrequencyDays {
+                parts.append("Watering frequency: every \(freq) days.")
+            }
+            if let light = memory.lightPreference {
+                parts.append("Light/environment: \(light).")
+            }
+            if let reason = memory.latestAdjustmentReason {
+                parts.append("Previous adjustment: \(reason).")
+            }
+        }
+        if let summary = summaries.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            parts.append("Chat history: \(summary.summary)")
+        }
+        if let dateRange = intake.dateRangeText {
+            parts.append("User is away: \(dateRange).")
+        }
+        if let helper = intake.helperAvailable {
+            parts.append("Someone can help while away: \(helper ? "yes" : "no").")
+        }
+        if let style = intake.style {
+            switch style {
+            case .conservative: parts.append("User prefers conservative (avoid underwatering).")
+            case .balanced: parts.append("User prefers balanced approach.")
+            case .handsOff: parts.append("User prefers hands-off (minimal actions).")
+            }
+        }
+        if let early = intake.preferEarly {
+            parts.append(early ? "User prefers watering earlier before leaving." : "User prefers catching up after returning.")
+        }
+        if let goal = intake.longTermGoal {
+            parts.append("Long-term goal: \(goal).")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private func taskDateLabel(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day())
     }
 
     private func buildAdjustmentDraft(from intake: AdjustmentIntake) -> PendingPlanAdjustment? {
@@ -664,13 +760,16 @@ struct Scenario1FlowView: View {
 
         let preferEarly = intake.preferEarly ?? true
         var movedEarlyIndex: Int?
+        let dateLabel = { (d: Date) -> String in d.formatted(.dateTime.month(.abbreviated).day()) }
+        let awayLabel = "\(dateLabel(awayStart)) – \(dateLabel(awayEnd))"
+
         if preferEarly {
             movedEarlyIndex = indicesInAway.first(where: { proposed[$0].title.lowercased().contains("water") })
             if let idx = movedEarlyIndex {
                 let original = proposed[idx]
-                let reason = "Moved watering earlier so the plant gets moisture before your trip."
-                proposed[idx] = adjustedTask(from: original, newDate: dayBeforeAway, reason: reason)
-                changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+                proposed[idx] = adjustedTask(from: original, newDate: dayBeforeAway, reason: "Moved earlier before absence.")
+                let whyFallback = "Pre-watering deeply saturates the root zone, creating a moisture buffer that sustains the plant while you're away. Most houseplants can draw water from deeper soil layers for 7–10 days after a thorough soaking. This approach minimizes drought stress without the risk of overwatering."
+                changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: whyFallback))
             }
         }
 
@@ -678,30 +777,19 @@ struct Scenario1FlowView: View {
         for idx in indicesInAway {
             if preferEarly, idx == movedEarlyIndex { continue }
             let original = proposed[idx]
-            let reason = "Paused while you are away and resumed after return."
-            proposed[idx] = adjustedTask(from: original, newDate: resumeDay, reason: reason)
-            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+            let delayDays = calendar.dateComponents([.day], from: original.dueDate, to: resumeDay).day ?? 0
+            proposed[idx] = adjustedTask(from: original, newDate: resumeDay, reason: "Paused during absence, resumed after return.")
+            let whyFallback = biologyFallback(for: original.title, delayDays: delayDays)
+            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: whyFallback))
             resumeDay = calendar.date(byAdding: .day, value: spacing, to: resumeDay) ?? resumeDay
         }
 
         proposed.sort { $0.dueDate < $1.dueDate }
 
-        let helperText = intake.helperAvailable == true
-            ? "Optional: ask your helper for one quick soil check during the trip."
-            : "Optional: if possible, add one mid-trip soil check reminder."
-
-        let summary = [
-            "Water once before your trip.",
-            "Pause reminders while you're away (\(dateText(awayStartDay)) - \(dateText(awayEndDay))).",
-            "Resume the regular schedule after you return."
-        ]
-
         return PendingPlanAdjustment(
             plantName: intake.plantName,
             currentTasks: currentTasks,
             proposedTasks: proposed,
-            strategySummary: summary,
-            optionalTip: helperText,
             changes: changes
         )
     }
@@ -714,14 +802,17 @@ struct Scenario1FlowView: View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         var nextWaterDate = today
+        let dateLabel = { (d: Date) -> String in d.formatted(.dateTime.month(.abbreviated).day()) }
+        var waterIndex = 1
 
         for idx in proposed.indices {
             guard proposed[idx].title.lowercased().contains("water") else { continue }
             let original = proposed[idx]
-            let reason = "Updated to your new long-term watering preference (every \(desiredInterval) days)."
-            proposed[idx] = adjustedTask(from: original, newDate: nextWaterDate, reason: reason)
-            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: reason))
+            proposed[idx] = adjustedTask(from: original, newDate: nextWaterDate, reason: "Adjusted to every-\(desiredInterval)-day schedule.")
+            let whyFallback = "Shifting to an every-\(desiredInterval)-day watering cycle aligns with this plant's root absorption rate. Most soil mixes retain adequate moisture for \(desiredInterval)–\(desiredInterval + 3) days depending on pot size and humidity, so this frequency keeps the root zone consistently moist without waterlogging."
+            changes.append(PendingTaskChange(originalTask: original, proposedTask: proposed[idx], reason: whyFallback))
             nextWaterDate = calendar.date(byAdding: .day, value: desiredInterval, to: nextWaterDate) ?? nextWaterDate
+            waterIndex += 1
         }
 
         proposed.sort { $0.dueDate < $1.dueDate }
@@ -730,11 +821,6 @@ struct Scenario1FlowView: View {
             plantName: intake.plantName,
             currentTasks: currentTasks,
             proposedTasks: proposed,
-            strategySummary: [
-                "Adopt a permanent watering cadence of every \(desiredInterval) days.",
-                "Keep non-watering tasks as close to the existing routine as possible."
-            ],
-            optionalTip: "You can fine-tune this later after one or two check-ins.",
             changes: changes
         )
     }
@@ -746,6 +832,24 @@ struct Scenario1FlowView: View {
             notes: task.notes + noteSuffix + "[Adjusted] \(reason)",
             dueDate: newDate
         )
+    }
+
+    /// Pre-written plant biology fallback in case the AI call fails
+    private func biologyFallback(for taskTitle: String, delayDays: Int) -> String {
+        let lower = taskTitle.lowercased()
+        if lower.contains("water") {
+            return "Your plant's soil acts as a moisture reservoir — even as the top inch dries out, deeper roots continue accessing water. Most tropical houseplants tolerate \(delayDays)–\(delayDays + 3) days between waterings depending on pot size and ambient humidity. After this gap, a thorough watering will fully rehydrate the root zone without causing stress."
+        } else if lower.contains("fertil") {
+            return "Fertilizer salts dissolve slowly and remain bioavailable in the soil for 2–3 weeks, so a \(delayDays)-day delay has minimal impact on nutrient supply. Your plant's roots continuously absorb residual nitrogen, phosphorus, and potassium from the existing soil solution. Resuming on the new date keeps the nutrient cycle consistent."
+        } else if lower.contains("rotat") || lower.contains("turn") {
+            return "Plants exhibit phototropism — stems and leaves gradually bend toward light at roughly 10–20° per week. A \(delayDays)-day pause may cause slight asymmetric growth, but this is fully reversible once you resume rotation. Your plant's auxin distribution will rebalance within a few days of turning."
+        } else if lower.contains("prun") || lower.contains("trim") {
+            return "Pruning timing is flexible for most houseplants. Delaying by \(delayDays) days won't significantly affect branching patterns or disease susceptibility. The plant simply continues allocating energy to existing growth points, and pruning when you return will redirect that energy to new lateral shoots."
+        } else if lower.contains("mist") || lower.contains("humid") {
+            return "Leaf transpiration rates depend on ambient humidity — in dry indoor air, leaf edges may curl slightly after \(delayDays) days without misting. However, most houseplants adapt by partially closing stomata to conserve moisture. Resuming misting will restore normal transpiration within a day or two."
+        } else {
+            return "A \(delayDays)-day gap in this care routine is within the tolerance range of most houseplants. Plants naturally adapt their metabolic rates to environmental changes, and resuming the routine allows them to quickly return to their normal growth pattern."
+        }
     }
 
     private func spacingDays(for style: AdjustmentStyle) -> Int {
@@ -946,7 +1050,7 @@ private struct OptionCard: View {
 }
 
 #Preview {
-    Scenario1FlowView()
+    Scenario1FlowView(selectedTab: .constant(1))
         .modelContainer(for: [
             PlantProfile.self,
             ChatMessage.self,

@@ -74,18 +74,21 @@ final class CareTask {
     var dueDate: Date
     var isCompleted: Bool
     var createdAt: Date
+    var googleEventId: String?
 
     init(plantName: String,
          title: String,
          notes: String,
          dueDate: Date,
-         isCompleted: Bool = false) {
+         isCompleted: Bool = false,
+         googleEventId: String? = nil) {
         self.plantName = plantName
         self.title = title
         self.notes = notes
         self.dueDate = dueDate
         self.isCompleted = isCompleted
         self.createdAt = Date()
+        self.googleEventId = googleEventId
     }
 }
 
@@ -122,8 +125,6 @@ struct PendingPlanAdjustment: Identifiable, Hashable {
     var plantName: String
     var currentTasks: [PendingCareTask]
     var proposedTasks: [PendingCareTask]
-    var strategySummary: [String]
-    var optionalTip: String?
     var changes: [PendingTaskChange]
 }
 

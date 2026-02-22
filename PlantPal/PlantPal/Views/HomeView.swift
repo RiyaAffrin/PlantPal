@@ -28,7 +28,7 @@ struct HomeView: View {
 
                 Spacer()
 
-                NavigationLink("Start setup", destination: Scenario1FlowView())
+                NavigationLink("Start setup", destination: Scenario1FlowView(selectedTab: .constant(1)))
                     .font(.headline)
                     .frame(maxWidth: 240)
                     .padding(.vertical, 12)

@@ -6,10 +6,14 @@ struct GoogleCalendarService {
         var errorDescription: String? { message }
     }
 
-    func createEvents(from plan: [CalendarPlanItem], accessToken: String) async throws {
+    /// Creates events and returns the Google Calendar event IDs for each created event
+    @discardableResult
+    func createEvents(from plan: [CalendarPlanItem], accessToken: String) async throws -> [String] {
         guard let url = URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events") else {
             throw CalendarAPIError(message: "Invalid calendar endpoint")
         }
+
+        var eventIds: [String] = []
 
         for item in plan {
             var request = URLRequest(url: url)
@@ -36,10 +40,38 @@ struct GoogleCalendarService {
             }
 
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw CalendarAPIError(message: "Google Calendar error: HTTP \(http.statusCode)")
+            }
+
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let eventId = json["id"] as? String {
+                eventIds.append(eventId)
+            }
+        }
+
+        return eventIds
+    }
+
+    /// Deletes events from Google Calendar by their IDs
+    func deleteEvents(ids: [String], accessToken: String) async throws {
+        for id in ids {
+            guard let url = URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(id)") else {
+                continue
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "DELETE"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+
+            if let http = response as? HTTPURLResponse,
+               !(200...299).contains(http.statusCode) && http.statusCode != 410 {
+
+                throw CalendarAPIError(message: "Failed to delete event: HTTP \(http.statusCode)")
             }
         }
     }

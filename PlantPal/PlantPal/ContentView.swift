@@ -10,7 +10,7 @@ struct ContentView: View {
                 .tabItem { Label("Today", systemImage: "leaf.fill") }
                 .tag(0)
 
-            Scenario1FlowView(resetTrigger: $chatResetTrigger)
+            Scenario1FlowView(selectedTab: $selectedTab, resetTrigger: $chatResetTrigger)
                 .tabItem { Label("Chat", systemImage: "sparkles") }
                 .tag(1)
 

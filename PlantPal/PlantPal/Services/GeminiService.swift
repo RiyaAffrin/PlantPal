@@ -121,6 +121,94 @@ struct GeminiService {
         return try parseSchedulePlan(from: text)
     }
 
+    /// Generates explanation for why a specific schedule change was proposed
+    func generateBatchWhyExplanations(context: String, questions: [String]) async throws -> [String] {
+        let numberedQuestions = questions.joined(separator: "\n")
+        let prompt = """
+        You are a plant biologist explaining care decisions to a plant owner.
+
+        Below are \(questions.count) care schedule changes. For EACH one, write a unique 3-4 sentence explanation rooted in plant biology.
+
+        STRICT RULES:
+        - DO NOT mention specific dates, trip dates, or travel plans.
+        - DO NOT say "rescheduled to", "moved to", or "falls during your trip".
+        - Focus on plant science: root absorption, soil moisture curves, nutrient half-life, phototropism, transpiration, drought tolerance, growth stages.
+        - Reference the plant species by name with botanical facts specific to that species.
+        - Each explanation must be DIFFERENT in content and structure — do not repeat the same points across explanations.
+        - Be warm and conversational. No markdown.
+
+        FORMAT YOUR RESPONSE EXACTLY LIKE THIS (use ---1---, ---2---, etc. as separators):
+        ---1---
+        [explanation for change 1]
+        ---2---
+        [explanation for change 2]
+        (and so on for each change)
+
+        Plant context:
+        \(context)
+
+        Changes:
+        \(numberedQuestions)
+        """
+
+        let raw = try await sendPrompt(prompt)
+        return parseBatchExplanations(raw, expectedCount: questions.count)
+    }
+
+    private func parseBatchExplanations(_ text: String, expectedCount: Int) -> [String] {
+        var results: [String] = []
+        for i in 1...expectedCount {
+            let marker = "---\(i)---"
+            let nextMarker = "---\(i + 1)---"
+            guard let startRange = text.range(of: marker) else { continue }
+            let after = text[startRange.upperBound...]
+            let content: String
+            if let endRange = after.range(of: nextMarker) {
+                content = String(after[..<endRange.lowerBound])
+            } else {
+                content = String(after)
+            }
+            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                results.append(trimmed)
+            }
+        }
+        return results
+    }
+
+    // shared helper to fire a single-prompt request to Gemini
+    private func sendPrompt(_ prompt: String) async throws -> String {
+        guard let apiKey = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String,
+              !apiKey.isEmpty, !apiKey.hasPrefix("<#") else {
+            throw GeminiError(message: "Missing GEMINI_API_KEY. Set it in Secrets.xcconfig.")
+        }
+
+        let requestBody = GeminiRequest(contents: [
+            GeminiContent(role: "user", parts: [GeminiPart(text: prompt)])
+        ])
+
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(modelName):generateContent?key=\(apiKey)") else {
+            throw GeminiError(message: "Invalid Gemini endpoint")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(requestBody)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw GeminiError(message: "Gemini API error: HTTP \(http.statusCode) \(text)")
+        }
+
+        let decoded = try JSONDecoder().decode(GeminiResponse.self, from: data)
+        guard let text = decoded.candidates.first?.content.parts.first?.text else {
+            throw GeminiError(message: "No response text from Gemini")
+        }
+        return text
+    }
+
     private func buildSystemInstruction(memory: PlantMemory?, summary: ConversationSummary?) -> String? {
         var lines: [String] = [
             "You are PlantPal, an AI plant-care agent.",

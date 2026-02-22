@@ -250,21 +250,35 @@ struct ReviewPlanView: View {
         guard let draftPlan, let token = googleAuth.accessToken else { return }
         isApplying = true
 
-        // save to SwiftData first
-        replaceTasks(for: draftPlan.plantName, with: draftPlan.tasks)
+        let existing = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(draftPlan.plantName) == .orderedSame }
+        let calService = GoogleCalendarService()
 
-        // push each task as a one-time event to Google Calendar
+        // delete previous Google events if they exist
+        let oldEventIds = existing.compactMap(\.googleEventId)
+        if !oldEventIds.isEmpty {
+            try? await calService.deleteEvents(ids: oldEventIds, accessToken: token)
+        }
+
+        existing.forEach { modelContext.delete($0) }
+
+        // create new CareTask objects
+        var newCareTasks: [CareTask] = []
+        for task in draftPlan.tasks {
+            let ct = CareTask(plantName: draftPlan.plantName, title: task.title, notes: task.notes, dueDate: task.dueDate)
+            modelContext.insert(ct)
+            newCareTasks.append(ct)
+        }
+
+        // push to Google Calendar and store event IDs
         let calendarItems = draftPlan.tasks.map { task in
-            CalendarPlanItem(
-                title: task.title,
-                guidance: task.notes,
-                rrule: nil,
-                startDate: task.dueDate
-            )
+            CalendarPlanItem(title: task.title, guidance: task.notes, rrule: nil, startDate: task.dueDate)
         }
 
         do {
-            try await GoogleCalendarService().createEvents(from: calendarItems, accessToken: token)
+            let eventIds = try await calService.createEvents(from: calendarItems, accessToken: token)
+            for (i, id) in eventIds.enumerated() where i < newCareTasks.count {
+                newCareTasks[i].googleEventId = id
+            }
             syncStatusMessage = "Plan applied and \(calendarItems.count) events added to Google Calendar."
         } catch {
             syncStatusMessage = "Plan saved locally, but calendar sync failed: \(error.localizedDescription)"
@@ -272,22 +286,6 @@ struct ReviewPlanView: View {
 
         showSyncAlert = true
         isApplying = false
-    }
-
-    private func replaceTasks(for plantName: String, with pendingTasks: [PendingCareTask]) {
-        let existing = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
-        existing.forEach { modelContext.delete($0) }
-
-        pendingTasks.forEach { task in
-            modelContext.insert(
-                CareTask(
-                    plantName: plantName,
-                    title: task.title,
-                    notes: task.notes,
-                    dueDate: task.dueDate
-                )
-            )
-        }
     }
 
     private func matchingTasks(_ keyword: String) -> [PendingCareTask] {
