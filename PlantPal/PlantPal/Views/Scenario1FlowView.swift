@@ -127,7 +127,7 @@ struct Scenario1FlowView: View {
                 Text(errorMessage ?? "")
             }
             .navigationDestination(item: $pendingPlan) { plan in
-                ReviewPlanView(plantName: plan.plantName, draftPlan: plan, selectedTab: $selectedTab)
+                ReviewPlanView(plantName: plan.plantName, draftPlan: plan, selectedTab: $selectedTab, onDismissAfterApply: { resetToInitialState() })
             }
             .navigationDestination(item: $adjustmentPreview) { plan in
                 AdjustPlanPreviewView(selectedTab: $selectedTab, draft: plan)
@@ -173,31 +173,31 @@ struct Scenario1FlowView: View {
         case .collectPlantName:
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("Got it. What type/species is \(trimmed)?", plantName: trimmed)
+            addAssistantMessage("Got it. What type/species is \(trimmed)?", plantName: "PlantPal")
             setupStep = .collectPlantType(name: trimmed)
             isSending = false
         case .collectPlantType(let name):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("Where do you keep \(name)? (e.g. bedroom window, balcony)", plantName: name)
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            addAssistantMessage("Where do you keep \(name)? (e.g. bedroom window, balcony)", plantName: "PlantPal")
             setupStep = .collectLocation(name: name, type: trimmed)
             isSending = false
         case .collectLocation(let name, let type):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("Which city are you in?", plantName: name)
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            addAssistantMessage("Which city are you in?", plantName: "PlantPal")
             setupStep = .collectCity(name: name, type: type, placement: trimmed)
             isSending = false
         case .collectCity(let name, let type, let placement):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("What is the usual temperature around the plant? (e.g. 18-24C / 65-75F)", plantName: name)
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            addAssistantMessage("What is the usual temperature around the plant? (e.g. 18-24C / 65-75F)", plantName: "PlantPal")
             setupStep = .collectTemperature(name: name, type: type, placement: placement, city: trimmed)
             isSending = false
         case .collectTemperature(let name, let type, let placement, let city):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("Last one: do you want a low-maintenance plan, balanced plan, or growth-focused plan?", plantName: name)
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            addAssistantMessage("Last one: do you want a low-maintenance plan, balanced plan, or growth-focused plan?", plantName: "PlantPal")
             setupStep = .collectCareGoal(
                 name: name,
                 type: type,
@@ -208,7 +208,7 @@ struct Scenario1FlowView: View {
             isSending = false
         case .collectCareGoal(let name, let type, let placement, let city, let temperature):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: name)
+            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
             Task {
                 await createPlantAndSchedule(
                     name: name,
@@ -430,11 +430,11 @@ struct Scenario1FlowView: View {
         )
         planReadyForReview = plan
 
-        addAssistantMessage("Done. I created a default plan for \(name).", plantName: name)
+        addAssistantMessage("Done. I created a default plan for \(name).", plantName: "PlantPal")
         if let explanation = scheduleResult.explanation, !explanation.isEmpty {
-            addAssistantMessage(explanation, plantName: name)
+            addAssistantMessage(explanation, plantName: "PlantPal")
         }
-        addAssistantMessage("Please review and apply the plan first. It will appear in Care Today after you apply.", plantName: name)
+        addAssistantMessage("Please review and apply the plan first. It will appear in Care Today after you apply.", plantName: "PlantPal")
     }
 
     private func generatedTasksFromGemini(
