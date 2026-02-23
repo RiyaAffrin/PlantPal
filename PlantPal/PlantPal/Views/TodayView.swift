@@ -114,6 +114,9 @@ struct ReviewPlanView: View {
     @Environment(\.modelContext) private var modelContext
     let plantName: String?
     let draftPlan: PendingCarePlan?
+    /// When entering from the Chat flow, click OK in the Calendar
+    //  Sync pop-up and then switch back to the Today page.
+    var selectedTab: Binding<Int>? = nil
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @EnvironmentObject private var googleAuth: GoogleAuthManager
@@ -121,9 +124,10 @@ struct ReviewPlanView: View {
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
 
-    init(plantName: String? = nil, draftPlan: PendingCarePlan? = nil) {
+    init(plantName: String? = nil, draftPlan: PendingCarePlan? = nil, selectedTab: Binding<Int>? = nil) {
         self.plantName = plantName
         self.draftPlan = draftPlan
+        self.selectedTab = selectedTab
     }
 
     private var activePlantName: String {
@@ -229,7 +233,9 @@ struct ReviewPlanView: View {
         .navigationTitle(activePlantName)
         .navigationBarTitleDisplayMode(.inline)
         .alert("Calendar Sync", isPresented: $showSyncAlert) {
-            Button("OK", role: .cancel) {}
+            Button("OK", role: .cancel) {
+                selectedTab?.wrappedValue = 0
+            }
         } message: {
             Text(syncStatusMessage)
         }

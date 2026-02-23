@@ -22,6 +22,10 @@ struct Scenario1FlowView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
     @State private var pendingPlan: PendingCarePlan?
+    /// After the user selects the plan type, three paragraphs plus this option are displayed;
+    //  after the user clicks "Review Plan," 
+    // the value is assigned to the pending Plan and the user is redirected.
+    @State private var planReadyForReview: PendingCarePlan?
     @State private var pendingAdjustmentDraft: PendingPlanAdjustment?
     @State private var adjustmentPreview: PendingPlanAdjustment?
     @State private var adjustmentIntake: AdjustmentIntake?
@@ -55,6 +59,21 @@ struct Scenario1FlowView: View {
                                 inputText = selected
                                 handleSend()
                             }
+                            .frame(maxWidth: 340)
+                        }
+
+                        if let plan = planReadyForReview {
+                            Button {
+                                pendingPlan = plan
+                                planReadyForReview = nil
+                            } label: {
+                                Text("Review Plan")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
                             .frame(maxWidth: 340)
                         }
                     }
@@ -108,7 +127,7 @@ struct Scenario1FlowView: View {
                 Text(errorMessage ?? "")
             }
             .navigationDestination(item: $pendingPlan) { plan in
-                ReviewPlanView(plantName: plan.plantName, draftPlan: plan)
+                ReviewPlanView(plantName: plan.plantName, draftPlan: plan, selectedTab: $selectedTab)
             }
             .navigationDestination(item: $adjustmentPreview) { plan in
                 AdjustPlanPreviewView(selectedTab: $selectedTab, draft: plan)
@@ -134,6 +153,7 @@ struct Scenario1FlowView: View {
         inputText = ""
         setupStep = .awaitingIntent
         pendingPlan = nil
+        planReadyForReview = nil
         pendingAdjustmentDraft = nil
         adjustmentPreview = nil
         adjustmentIntake = nil
@@ -403,11 +423,12 @@ struct Scenario1FlowView: View {
         let pendingTasks = scheduleResult.tasks.map {
             PendingCareTask(title: $0.title, notes: $0.notes, dueDate: $0.dueDate)
         }
-        pendingPlan = PendingCarePlan(
+        let plan = PendingCarePlan(
             plantName: name,
             tasks: pendingTasks,
             explanation: scheduleResult.explanation
         )
+        planReadyForReview = plan
 
         addAssistantMessage("Done. I created a default plan for \(name).", plantName: name)
         if let explanation = scheduleResult.explanation, !explanation.isEmpty {
