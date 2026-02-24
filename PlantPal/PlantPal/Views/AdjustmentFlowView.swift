@@ -108,7 +108,7 @@ struct MeView: View {
                     }
                 }
 
-<<<<<<< Updated upstream
+
                 #if DEBUG
                 Section("Debug") {
                     Button("Clear All Data", role: .destructive) {
