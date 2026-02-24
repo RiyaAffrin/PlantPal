@@ -11,6 +11,7 @@ struct Scenario1FlowView: View {
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
     @Query(sort: \PlantMemory.updatedAt, order: .reverse) private var memories: [PlantMemory]
     @Query(sort: \CareTask.dueDate, order: .forward) private var allTasks: [CareTask]
+    @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
 
     @State private var agentName = "PlantPal"
     @State private var chatMessages: [SetupMessage] = [
@@ -171,33 +172,35 @@ struct Scenario1FlowView: View {
             handleIntentSelection(trimmed)
             isSending = false
         case .collectPlantName:
+            // user just told us the plant name; move previous PlantPal-thread messages to this plant
+            reassignMessages(from: "PlantPal", to: trimmed)
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("Got it. What type/species is \(trimmed)?", plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: trimmed)
+            addAssistantMessage("Got it. What type/species is \(trimmed)?", plantName: trimmed)
             setupStep = .collectPlantType(name: trimmed)
             isSending = false
         case .collectPlantType(let name):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("Where do you keep \(name)? (e.g. bedroom window, balcony)", plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: name)
+            addAssistantMessage("Where do you keep \(name)? (e.g. bedroom window, balcony)", plantName: name)
             setupStep = .collectLocation(name: name, type: trimmed)
             isSending = false
         case .collectLocation(let name, let type):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("Which city are you in?", plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: name)
+            addAssistantMessage("Which city are you in?", plantName: name)
             setupStep = .collectCity(name: name, type: type, placement: trimmed)
             isSending = false
         case .collectCity(let name, let type, let placement):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("What is the usual temperature around the plant? (e.g. 18-24C / 65-75F)", plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: name)
+            addAssistantMessage("What is the usual temperature around the plant? (e.g. 18-24C / 65-75F)", plantName: name)
             setupStep = .collectTemperature(name: name, type: type, placement: placement, city: trimmed)
             isSending = false
         case .collectTemperature(let name, let type, let placement, let city):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
-            addAssistantMessage("Last one: do you want a low-maintenance plan, balanced plan, or growth-focused plan?", plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: name)
+            addAssistantMessage("Last one: do you want a low-maintenance plan, balanced plan, or growth-focused plan?", plantName: name)
             setupStep = .collectCareGoal(
                 name: name,
                 type: type,
@@ -208,7 +211,7 @@ struct Scenario1FlowView: View {
             isSending = false
         case .collectCareGoal(let name, let type, let placement, let city, let temperature):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
+            persistMessage(role: "user", content: trimmed, plantName: name)
             Task {
                 await createPlantAndSchedule(
                     name: name,
@@ -430,11 +433,11 @@ struct Scenario1FlowView: View {
         )
         planReadyForReview = plan
 
-        addAssistantMessage("Done. I created a default plan for \(name).", plantName: "PlantPal")
+        addAssistantMessage("Done. I created a default plan for \(name).", plantName: name)
         if let explanation = scheduleResult.explanation, !explanation.isEmpty {
-            addAssistantMessage(explanation, plantName: "PlantPal")
+            addAssistantMessage(explanation, plantName: name)
         }
-        addAssistantMessage("Please review and apply the plan first. It will appear in Care Today after you apply.", plantName: "PlantPal")
+        addAssistantMessage("Please review and apply the plan first. It will appear in Care Today after you apply.", plantName: name)
     }
 
     private func generatedTasksFromGemini(
@@ -605,6 +608,13 @@ struct Scenario1FlowView: View {
             return fromSummary
         }
         return nil
+    }
+
+    private func reassignMessages(from oldName: String, to newName: String) {
+        guard oldName.caseInsensitiveCompare(newName) != .orderedSame else { return }
+        messages
+            .filter { $0.plantName.caseInsensitiveCompare(oldName) == .orderedSame }
+            .forEach { $0.plantName = newName }
     }
 
     private func normalizedPlantName(from raw: String) -> String? {

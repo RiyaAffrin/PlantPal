@@ -229,7 +229,11 @@ struct ChatView: View {
 
     private func seedIfNeeded() {
         if visibleMessages.isEmpty {
-            addAgentMessage("Hi, I am PlantPal. What plant are you caring for?")
+            if let profile = activeProfile {
+                addAgentMessage("Hi, I'm PlantPal. How can I help with your \(profile.name) today?")
+            } else {
+                addAgentMessage("Hi, I am PlantPal. What plant are you caring for?")
+            }
         }
     }
 
@@ -511,7 +515,7 @@ struct StructuredMemoryCard: View {
                 .font(.headline)
 
             memoryRow("Watering frequency", value: frequencyText)
-            memoryRow("Light preference", value: memory.lightPreference ?? "Not set")
+            memoryRow("Light preference", value: lightPreferenceText)
             memoryRow("Latest adjustment", value: memory.latestAdjustmentReason ?? "Not set")
         }
         .padding()
@@ -522,6 +526,13 @@ struct StructuredMemoryCard: View {
     private var frequencyText: String {
         guard let days = memory.wateringFrequencyDays else { return "Not set" }
         return "Every \(days) day(s)"
+    }
+
+    private var lightPreferenceText: String {
+        guard let raw = memory.lightPreference, !raw.isEmpty else { return "Not set" }
+        let firstSentence = raw.split(separator: ".").first.map(String.init) ?? raw
+        let trimmed = firstSentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? raw : trimmed
     }
 
     private func memoryRow(_ title: String, value: String) -> some View {

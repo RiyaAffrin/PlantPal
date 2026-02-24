@@ -164,6 +164,10 @@ struct ReviewPlanView: View {
         return activeTasks
     }
 
+    private var sortedTasksByDate: [PendingCareTask] {
+        sourceTasks.sorted { $0.dueDate < $1.dueDate }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -195,6 +199,29 @@ struct ReviewPlanView: View {
                     nextDate: nextDate(for: "soil"),
                     tipText: tipText(for: "soil", fallback: "Only water if top soil feels dry.")
                 )
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Full Care Schedule")
+                        .font(.headline)
+
+                    ForEach(sortedTasksByDate) { task in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(task.dueDate, format: .dateTime.month(.abbreviated).day()) - \(task.title)")
+                                    .font(.subheadline)
+                                if !task.notes.isEmpty {
+                                    Text(task.notes)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 if draftPlan != nil {
                     VStack(alignment: .leading, spacing: 10) {
