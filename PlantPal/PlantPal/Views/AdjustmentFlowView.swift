@@ -15,9 +15,60 @@ struct MeView: View {
     @State private var showCalendarAlert = false
     @State private var plantToDelete: PlantProfile?
 
+    @AppStorage("userName") private var userName: String = ""
+    @AppStorage("notificationsEnabled") private var notificationsEnabled: Bool = true
+    @AppStorage("selectedTheme") private var selectedTheme: String = "System"
+    @State private var isEditingName = false
+    @State private var editingNameText = ""
+
     var body: some View {
         NavigationStack {
             List {
+
+                // MARK: Profile Header
+                Section {
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(red: 0.86, green: 0.97, blue: 0.84))
+                                .frame(width: 80, height: 80)
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.32))
+                        }
+
+                        if isEditingName {
+                            TextField("Enter your name", text: $editingNameText)
+                                .multilineTextAlignment(.center)
+                                .font(.headline)
+                                .onSubmit {
+                                    userName = editingNameText
+                                    isEditingName = false
+                                }
+                        } else {
+                            Text(userName.isEmpty ? "Add your name" : userName)
+                                .font(.headline)
+                                .foregroundStyle(userName.isEmpty ? .secondary : .primary)
+                        }
+
+                        Button(isEditingName ? "Save" : "Edit Profile") {
+                            if isEditingName {
+                                userName = editingNameText
+                                isEditingName = false
+                            } else {
+                                editingNameText = userName
+                                isEditingName = true
+                            }
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+
+                // MARK: My Plants
                 Section("My Plants") {
                     if plants.isEmpty {
                         Text("No plants yet. Add one in Setup.")
@@ -28,12 +79,21 @@ struct MeView: View {
                             NavigationLink {
                                 ReviewPlanView(plantName: plant.name)
                             } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(plant.name)
-                                        .font(.headline)
-                                    Text("\(plant.type) · \(plant.location)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color(red: 0.86, green: 0.97, blue: 0.84))
+                                            .frame(width: 40, height: 40)
+                                        Image(systemName: "leaf.fill")
+                                            .foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.32))
+                                    }
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(plant.name)
+                                            .font(.headline)
+                                        Text("\(plant.type) · \(plant.location)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -48,6 +108,7 @@ struct MeView: View {
                     }
                 }
 
+<<<<<<< Updated upstream
                 #if DEBUG
                 Section("Debug") {
                     Button("Clear All Data", role: .destructive) {
@@ -55,6 +116,10 @@ struct MeView: View {
                     }
                 }
                 #endif
+
+
+
+                // MARK: Connections (unchanged)
 
                 Section("Connections") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -81,6 +146,16 @@ struct MeView: View {
                         }
                     }
                     .padding(.vertical, 6)
+                }
+
+                // MARK: About
+                Section("About") {
+                    HStack {
+                        Label("Version", systemImage: "info.circle")
+                        Spacer()
+                        Text("1.0.0")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle("Me")
@@ -119,8 +194,28 @@ struct MeView: View {
     }
 }
 
+// MARK: Privacy View
+struct PrivacyView: View {
+    var body: some View {
+        List {
+            Section("Data") {
+                Label("All plant data is stored locally on your device.", systemImage: "iphone")
+                    .font(.subheadline)
+                Label("Chat history is used only to generate care advice.", systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline)
+            }
+            Section("API Usage") {
+                Label("Messages sent to Gemini are not stored by PlantPal.", systemImage: "lock.shield")
+                    .font(.subheadline)
+            }
+        }
+        .navigationTitle("Privacy")
+    }
+}
+
 #Preview {
     MeView()
+        .modelContainer(for: [PlantProfile.self, CareTask.self], inMemory: true)
 }
 
 private extension MeView {
