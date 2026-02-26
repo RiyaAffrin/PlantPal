@@ -122,6 +122,7 @@ struct ReviewPlanView: View {
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @EnvironmentObject private var googleAuth: GoogleAuthManager
     @State private var isApplying = false
+    @State private var isSyncing = false
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
 
@@ -166,6 +167,15 @@ struct ReviewPlanView: View {
 
     private var sortedTasksByDate: [PendingCareTask] {
         sourceTasks.sorted { $0.dueDate < $1.dueDate }
+    }
+
+    /// CareTask array that matches the displayed plan (for syncing to Google Tasks).
+    private var careTasksForSync: [CareTask] {
+        let forPlant = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(activePlantName) == .orderedSame }.sorted { $0.dueDate < $1.dueDate }
+        if forPlant.isEmpty && !tasks.isEmpty {
+            return tasks.sorted { $0.dueDate < $1.dueDate }
+        }
+        return forPlant
     }
 
     var body: some View {
@@ -245,14 +255,28 @@ struct ReviewPlanView: View {
                         .disabled(!googleAuth.isSignedIn || isApplying || sourceTasks.isEmpty)
                     }
                 } else {
-                    Button("Sync to Google Calendar (Demo)") {
-                        syncToGoogleCalendarDemo()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                    .frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(googleAuth.isSignedIn ? "Connected to Google Calendar." : "Not connected to Google Calendar yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
 
-                    Text("Only plant-care events are synced. Demo mode does not call Google APIs.")
+                        if !googleAuth.isSignedIn {
+                            Button("Connect to Google Calendar") {
+                                Task { await googleAuth.signIn() }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        Button(isSyncing ? "Syncing..." : "Sync to Google Calendar") {
+                            Task { await syncToGoogleCalendar() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .frame(maxWidth: .infinity)
+                        .disabled(!googleAuth.isSignedIn || isSyncing || careTasksForSync.isEmpty)
+                    }
+
+                    Text("Only plant-care events are synced.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -276,10 +300,36 @@ struct ReviewPlanView: View {
         }
     }
 
-    private func syncToGoogleCalendarDemo() {
-        let count = min(20, sourceTasks.count)
-        syncStatusMessage = "Demo mode: simulated sync of \(count) care events to Google Calendar."
+    private func syncToGoogleCalendar() async {
+        guard let token = googleAuth.accessToken else {
+            syncStatusMessage = "Please connect to Google Calendar first."
+            showSyncAlert = true
+            return
+        }
+        let careTasksToSync = careTasksForSync
+        if careTasksToSync.isEmpty {
+            syncStatusMessage = "No care tasks to sync."
+            showSyncAlert = true
+            return
+        }
+        isSyncing = true
+        let tasksService = GoogleTasksService()
+        let oldTaskIds = careTasksToSync.compactMap(\.googleEventId)
+        if !oldTaskIds.isEmpty {
+            try? await tasksService.deleteTasks(ids: oldTaskIds, accessToken: token)
+        }
+        let taskItems = careTasksToSync.map { TaskPlanItem(title: $0.title, notes: $0.notes, dueDate: $0.dueDate) }
+        do {
+            let taskIds = try await tasksService.createTasks(from: taskItems, accessToken: token)
+            for (i, id) in taskIds.enumerated() where i < careTasksToSync.count {
+                careTasksToSync[i].googleEventId = id
+            }
+            syncStatusMessage = "Synced \(taskIds.count) care events to Google Tasks."
+        } catch {
+            syncStatusMessage = "Sync failed: \(error.localizedDescription)"
+        }
         showSyncAlert = true
+        isSyncing = false
     }
 
     private func applyDraftPlan() async {
