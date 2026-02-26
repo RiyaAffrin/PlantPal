@@ -250,31 +250,12 @@ private extension MeView {
         calendarStatusMessage = "Now connecting Google..."
         Task {
             await googleAuth.signIn()
-            guard googleAuth.isSignedIn, let token = googleAuth.accessToken else {
+            guard googleAuth.isSignedIn, let _ = googleAuth.accessToken else {
                 return
             }
 
-            let plan = [
-                TaskPlanItem(
-                    title: "Water plants",
-                    notes: "Water your plants and check soil moisture.",
-                    dueDate: Date()
-                ),
-                TaskPlanItem(
-                    title: "Rotate pots",
-                    notes: "Rotate pots for even light exposure.",
-                    dueDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
-                )
-            ]
-
-            do {
-                try await GoogleTasksService().createTasks(from: plan, accessToken: token)
-                calendarStatusMessage = "Sample tasks have been created in Google Tasks."
-                showCalendarAlert = true
-            } catch {
-                calendarStatusMessage = error.localizedDescription
-                showCalendarAlert = true
-            }
+            calendarStatusMessage = "Connected to Google Calendar."
+            showCalendarAlert = true
         }
     }
 }
