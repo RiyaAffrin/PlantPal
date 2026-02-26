@@ -128,6 +128,20 @@ struct PendingPlanAdjustment: Identifiable, Hashable {
     var changes: [PendingTaskChange]
 }
 
+/// Stores the most recent check-in photo per plant, shown as "old photo" on the next check-in.
+@Model
+final class PlantReferencePhoto {
+    var plantName: String
+    var imageData: Data?
+    var photoDate: Date?
+
+    init(plantName: String, imageData: Data? = nil, photoDate: Date? = nil) {
+        self.plantName = plantName
+        self.imageData = imageData
+        self.photoDate = photoDate ?? (imageData != nil ? Date() : nil)
+    }
+}
+
 extension Date {
     static func daysFromNow(_ days: Int) -> Date {
         Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()

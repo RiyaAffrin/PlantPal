@@ -1,15 +1,33 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 struct TodayView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject private var googleAuth: GoogleAuthManager
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
+    @Query private var referencePhotos: [PlantReferencePhoto]
     @State private var checkInSelection: String?
+    @State private var checkInNewPhotoData: Data?
+    @State private var checkInSelectedPhotoItem: PhotosPickerItem?
+    @State private var showCheckInPhotoSource = false
+    @State private var showCamera = false
+    @State private var showPhotoPicker = false
 
     private var todaysTasks: [CareTask] {
         tasks.filter { Calendar.current.isDateInToday($0.dueDate) }
+    }
+
+    private var primaryPlantName: String? {
+        profiles.first?.name
+    }
+
+    /// The "old" photo from last check-in (or last time user took a photo for this plant).
+    private var checkInReferencePhoto: PlantReferencePhoto? {
+        guard let name = primaryPlantName else { return nil }
+        return referencePhotos.first { $0.plantName.localizedCaseInsensitiveCompare(name) == .orderedSame && $0.imageData != nil }
     }
 
     var body: some View {
@@ -93,9 +111,95 @@ struct TodayView: View {
             Section("Check-in") {
                 Text("How did your plant respond after the last watering?")
                     .font(.subheadline)
-                Button("It looks healthier") { checkInSelection = "It looks healthier" }
-                Button("No change yet") { checkInSelection = "No change yet" }
-                Button("Leaves look worse") { checkInSelection = "Leaves look worse" }
+
+                if let ref = checkInReferencePhoto, let data = ref.imageData, let uiImage = UIImage(data: data) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 120, height: 120)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        if let date = ref.photoDate {
+                            Text(date, format: .dateTime.month(.abbreviated).day())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
+
+                if let newData = checkInNewPhotoData, let uiImage = UIImage(data: newData) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 120, height: 120)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Text("Today")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                }
+
+                Button {
+                    showCheckInPhotoSource = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "camera")
+                        Text("Take or select a photo")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                .popover(isPresented: $showCheckInPhotoSource, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Add a photo to compare next time.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 8)
+                        Button {
+                            showCheckInPhotoSource = false
+                            showCamera = true
+                        } label: {
+                            Text("Take Photo")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            showCheckInPhotoSource = false
+                            showPhotoPicker = true
+                        } label: {
+                            Text("Choose from Library")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                        Button("Cancel", role: .cancel) {
+                            showCheckInPhotoSource = false
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
+                    .presentationCompactAdaptation(.popover)
+                }
+
+                checkInOptionButton(title: "It looks healthier")
+                checkInOptionButton(title: "No change yet")
+                checkInOptionButton(title: "Leaves look worse")
+
                 if let checkInSelection {
                     Text("Selected: \(checkInSelection)")
                         .font(.caption)
@@ -104,9 +208,81 @@ struct TodayView: View {
             }
         }
         .navigationTitle("Care Today")
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker(imageData: $checkInNewPhotoData)
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            NavigationStack {
+                PhotosPicker(selection: $checkInSelectedPhotoItem, matching: .images) {
+                    Label("Choose from Library", systemImage: "photo.on.rectangle.angled")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
+                .onChange(of: checkInSelectedPhotoItem) { _, _ in
+                    showPhotoPicker = false
+                }
+                .padding()
+                .navigationTitle("Select Photo")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showPhotoPicker = false
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: checkInSelectedPhotoItem) { _, newItem in
+            Task {
+                guard let item = newItem else { return }
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await MainActor.run { checkInNewPhotoData = data }
+                }
+            }
+        }
+        .onChange(of: checkInSelection) { _, newValue in
+            if newValue != nil {
+                saveCheckInPhotoIfNeeded()
+            }
+        }
         .task(id: googleAuth.isSignedIn) {
             await syncCompletionFromGoogle()
         }
+    }
+
+    private func checkInOptionButton(title: String) -> some View {
+        Button {
+            checkInSelection = title
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if checkInSelection == title {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.blue)
+                }
+            }
+        }
+    }
+
+    /// When user has selected a response, save the new photo (if any) as the reference for next check-in.
+    private func saveCheckInPhotoIfNeeded() {
+        guard let plantName = primaryPlantName, let data = checkInNewPhotoData, !data.isEmpty else {
+            checkInNewPhotoData = nil
+            checkInSelectedPhotoItem = nil
+            return
+        }
+        let existing = referencePhotos.first { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
+        if let existing {
+            existing.imageData = data
+            existing.photoDate = Date()
+        } else {
+            let ref = PlantReferencePhoto(plantName: plantName, imageData: data, photoDate: Date())
+            modelContext.insert(ref)
+        }
+        checkInNewPhotoData = nil
+        checkInSelectedPhotoItem = nil
     }
 
     private func toggleComplete(_ task: CareTask) {
@@ -490,6 +666,7 @@ private struct PlanCardView: View {
             ChatMessage.self,
             ConversationSummary.self,
             PlantMemory.self,
-            CareTask.self
+            CareTask.self,
+            PlantReferencePhoto.self
         ], inMemory: true)
 }
