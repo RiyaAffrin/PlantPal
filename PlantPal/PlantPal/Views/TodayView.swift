@@ -3,6 +3,7 @@ import SwiftData
 
 struct TodayView: View {
     @Binding var selectedTab: Int
+    @EnvironmentObject private var googleAuth: GoogleAuthManager
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @State private var checkInSelection: String?
@@ -103,10 +104,41 @@ struct TodayView: View {
             }
         }
         .navigationTitle("Care Today")
+        .task(id: googleAuth.isSignedIn) {
+            await syncCompletionFromGoogle()
+        }
     }
 
     private func toggleComplete(_ task: CareTask) {
         task.isCompleted.toggle()
+        Task { await syncCompletionToGoogle(task) }
+    }
+
+    /// App → Google: when user marks complete in the app, update Google Task.
+    private func syncCompletionToGoogle(_ task: CareTask) async {
+        guard let taskId = task.googleEventId,
+              let token = googleAuth.accessToken else { return }
+        do {
+            try await GoogleTasksService().updateTaskStatus(taskId: taskId, isCompleted: task.isCompleted, accessToken: token)
+        } catch {
+            // Optionally surface error (e.g. toast); for now fail silently to avoid blocking UI
+        }
+    }
+
+    /// Google → App: on appear, fetch Google Tasks completion status and update local CareTasks.
+    private func syncCompletionFromGoogle() async {
+        guard googleAuth.isSignedIn, let token = googleAuth.accessToken else { return }
+        do {
+            let statusMap = try await GoogleTasksService().fetchTasksStatus(accessToken: token)
+            for task in tasks where task.googleEventId != nil {
+                guard let id = task.googleEventId, let completed = statusMap[id] else { continue }
+                if task.isCompleted != completed {
+                    task.isCompleted = completed
+                }
+            }
+        } catch {
+            // Optionally surface error
+        }
     }
 }
 
@@ -452,6 +484,7 @@ private struct PlanCardView: View {
 
 #Preview {
     TodayView(selectedTab: .constant(0))
+        .environmentObject(GoogleAuthManager())
         .modelContainer(for: [
             PlantProfile.self,
             ChatMessage.self,

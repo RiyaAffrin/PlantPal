@@ -92,6 +92,40 @@ struct GoogleTasksService {
             throw TasksAPIError(message: "Failed to update task status: HTTP \(http.statusCode) - \(text)")
         }
     }
+
+    /// Fetches completion status for all tasks in the default list (for syncing Google → App).
+    func fetchTasksStatus(accessToken: String) async throws -> [String: Bool] {
+        var result: [String: Bool] = [:]
+        var pageToken: String?
+        repeat {
+            var components = URLComponents(string: "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks")!
+            components.queryItems = [
+                URLQueryItem(name: "maxResults", value: "100"),
+                URLQueryItem(name: "showCompleted", value: "true")
+            ]
+            if let token = pageToken {
+                components.queryItems?.append(URLQueryItem(name: "pageToken", value: token))
+            }
+            guard let url = components.url else { throw TasksAPIError(message: "Invalid tasks list URL") }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                let text = String(data: data, encoding: .utf8) ?? ""
+                throw TasksAPIError(message: "Google Tasks list error: HTTP \(http.statusCode) - \(text)")
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = json["items"] as? [[String: Any]] else { break }
+            for item in items {
+                guard let id = item["id"] as? String,
+                      let status = item["status"] as? String else { continue }
+                result[id] = (status == "completed")
+            }
+            pageToken = json["nextPageToken"] as? String
+        } while pageToken != nil
+        return result
+    }
 }
 
 struct TaskPlanItem: Identifiable {
