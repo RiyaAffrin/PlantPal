@@ -255,23 +255,21 @@ private extension MeView {
             }
 
             let plan = [
-                CalendarPlanItem(
+                TaskPlanItem(
                     title: "Water plants",
-                    guidance: "Water your plants and check soil moisture.",
-                    rrule: "FREQ=WEEKLY;INTERVAL=1",
-                    startDate: Date()
+                    notes: "Water your plants and check soil moisture.",
+                    dueDate: Date()
                 ),
-                CalendarPlanItem(
+                TaskPlanItem(
                     title: "Rotate pots",
-                    guidance: "Rotate pots for even light exposure.",
-                    rrule: "FREQ=WEEKLY;INTERVAL=2",
-                    startDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
+                    notes: "Rotate pots for even light exposure.",
+                    dueDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
                 )
             ]
 
             do {
-                try await GoogleCalendarService().createEvents(from: plan, accessToken: token)
-                calendarStatusMessage = "Sample reminder has been connected and created."
+                try await GoogleTasksService().createTasks(from: plan, accessToken: token)
+                calendarStatusMessage = "Sample tasks have been created in Google Tasks."
                 showCalendarAlert = true
             } catch {
                 calendarStatusMessage = error.localizedDescription

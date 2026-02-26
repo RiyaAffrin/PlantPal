@@ -287,12 +287,12 @@ struct ReviewPlanView: View {
         isApplying = true
 
         let existing = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(draftPlan.plantName) == .orderedSame }
-        let calService = GoogleCalendarService()
+        let tasksService = GoogleTasksService()
 
-        // delete previous Google events if they exist
-        let oldEventIds = existing.compactMap(\.googleEventId)
-        if !oldEventIds.isEmpty {
-            try? await calService.deleteEvents(ids: oldEventIds, accessToken: token)
+        // delete previous Google tasks if they exist
+        let oldTaskIds = existing.compactMap(\.googleEventId)
+        if !oldTaskIds.isEmpty {
+            try? await tasksService.deleteTasks(ids: oldTaskIds, accessToken: token)
         }
 
         existing.forEach { modelContext.delete($0) }
@@ -305,19 +305,19 @@ struct ReviewPlanView: View {
             newCareTasks.append(ct)
         }
 
-        // push to Google Calendar and store event IDs
-        let calendarItems = draftPlan.tasks.map { task in
-            CalendarPlanItem(title: task.title, guidance: task.notes, rrule: nil, startDate: task.dueDate)
+        // push to Google Tasks and store task IDs
+        let taskItems = draftPlan.tasks.map { task in
+            TaskPlanItem(title: task.title, notes: task.notes, dueDate: task.dueDate)
         }
 
         do {
-            let eventIds = try await calService.createEvents(from: calendarItems, accessToken: token)
-            for (i, id) in eventIds.enumerated() where i < newCareTasks.count {
+            let taskIds = try await tasksService.createTasks(from: taskItems, accessToken: token)
+            for (i, id) in taskIds.enumerated() where i < newCareTasks.count {
                 newCareTasks[i].googleEventId = id
             }
-            syncStatusMessage = "Plan applied and \(calendarItems.count) events added to Google Calendar."
+            syncStatusMessage = "Plan applied and \(taskItems.count) tasks added to Google Tasks."
         } catch {
-            syncStatusMessage = "Plan saved locally, but calendar sync failed: \(error.localizedDescription)"
+            syncStatusMessage = "Plan saved locally, but Google Tasks sync failed: \(error.localizedDescription)"
         }
 
         showSyncAlert = true

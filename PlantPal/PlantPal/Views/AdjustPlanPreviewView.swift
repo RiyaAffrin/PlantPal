@@ -310,13 +310,13 @@ struct AdjustPlanPreviewView: View {
         previousTasks = draft.currentTasks
 
         let existing = allTasks.filter { $0.plantName.localizedCaseInsensitiveCompare(draft.plantName) == .orderedSame }
-        let calService = GoogleCalendarService()
+        let tasksService = GoogleTasksService()
 
-        // delete old events from Google Calendar before removing local data
+        // delete old tasks from Google Tasks before removing local data
         if let token = googleAuth.accessToken {
-            let oldEventIds = existing.compactMap(\.googleEventId)
-            if !oldEventIds.isEmpty {
-                try? await calService.deleteEvents(ids: oldEventIds, accessToken: token)
+            let oldTaskIds = existing.compactMap(\.googleEventId)
+            if !oldTaskIds.isEmpty {
+                try? await tasksService.deleteTasks(ids: oldTaskIds, accessToken: token)
             }
         }
 
@@ -330,18 +330,18 @@ struct AdjustPlanPreviewView: View {
             newCareTasks.append(ct)
         }
 
-        // push new events and store their Google IDs for future deletion
+        // push new tasks and store their Google IDs for future deletion
         if let token = googleAuth.accessToken {
-            let calendarItems = draft.proposedTasks.map { task in
-                CalendarPlanItem(title: task.title, guidance: task.notes, rrule: nil, startDate: task.dueDate)
+            let taskItems = draft.proposedTasks.map { task in
+                TaskPlanItem(title: task.title, notes: task.notes, dueDate: task.dueDate)
             }
             do {
-                let eventIds = try await calService.createEvents(from: calendarItems, accessToken: token)
-                for (i, id) in eventIds.enumerated() where i < newCareTasks.count {
+                let taskIds = try await tasksService.createTasks(from: taskItems, accessToken: token)
+                for (i, id) in taskIds.enumerated() where i < newCareTasks.count {
                     newCareTasks[i].googleEventId = id
                 }
             } catch {
-                syncError = "Plan saved locally, but calendar sync failed: \(error.localizedDescription)"
+                syncError = "Plan saved locally, but Google Tasks sync failed: \(error.localizedDescription)"
                 showSyncAlert = true
             }
         }
@@ -356,13 +356,13 @@ struct AdjustPlanPreviewView: View {
         isReverting = true
 
         let existing = allTasks.filter { $0.plantName.localizedCaseInsensitiveCompare(draft.plantName) == .orderedSame }
-        let calService = GoogleCalendarService()
+        let tasksService = GoogleTasksService()
 
-        // delete the applied events from Google Calendar
+        // delete the applied tasks from Google Tasks
         if let token = googleAuth.accessToken {
-            let currentEventIds = existing.compactMap(\.googleEventId)
-            if !currentEventIds.isEmpty {
-                try? await calService.deleteEvents(ids: currentEventIds, accessToken: token)
+            let currentTaskIds = existing.compactMap(\.googleEventId)
+            if !currentTaskIds.isEmpty {
+                try? await tasksService.deleteTasks(ids: currentTaskIds, accessToken: token)
             }
         }
 
@@ -376,18 +376,18 @@ struct AdjustPlanPreviewView: View {
             restoredCareTasks.append(ct)
         }
 
-        // push reverted plan and store event IDs
+        // push reverted plan and store task IDs
         if let token = googleAuth.accessToken {
-            let calendarItems = previousTasks.map { task in
-                CalendarPlanItem(title: task.title, guidance: task.notes, rrule: nil, startDate: task.dueDate)
+            let taskItems = previousTasks.map { task in
+                TaskPlanItem(title: task.title, notes: task.notes, dueDate: task.dueDate)
             }
             do {
-                let eventIds = try await calService.createEvents(from: calendarItems, accessToken: token)
-                for (i, id) in eventIds.enumerated() where i < restoredCareTasks.count {
+                let taskIds = try await tasksService.createTasks(from: taskItems, accessToken: token)
+                for (i, id) in taskIds.enumerated() where i < restoredCareTasks.count {
                     restoredCareTasks[i].googleEventId = id
                 }
             } catch {
-                syncError = "Tasks reverted locally, but calendar sync failed: \(error.localizedDescription)"
+                syncError = "Tasks reverted locally, but Google Tasks sync failed: \(error.localizedDescription)"
                 showSyncAlert = true
             }
         }

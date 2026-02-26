@@ -43,7 +43,7 @@ final class GoogleAuthManager: ObservableObject {
             let result = try await GIDSignIn.sharedInstance.signIn(
                 withPresenting: presentingViewController,
                 hint: nil,
-                additionalScopes: ["https://www.googleapis.com/auth/calendar.events"]
+                additionalScopes: ["https://www.googleapis.com/auth/tasks"]
             )
             let user = result.user
             accessToken = user.accessToken.tokenString
