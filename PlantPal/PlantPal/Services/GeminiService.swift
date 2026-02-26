@@ -66,7 +66,10 @@ struct GeminiService {
         }
 
         let prompt = """
-        You are generating a plant care plan for a mobile app.
+        You are a plant care specialist creating a HIGHLY PERSONALIZED care plan for a mobile app.
+        
+        CRITICAL: Each plant species requires DIFFERENT care. Analyze the specific needs of this plant type and create a plan that reflects its unique requirements.
+        
         Return JSON only, no markdown.
         JSON schema:
         {
@@ -80,18 +83,74 @@ struct GeminiService {
           ]
         }
 
-        Constraints:
-        - Return 5 tasks.
-        - dayOffset must be an integer >= 0.
-        - Include at least one task with dayOffset = 0.
-        - Include at least one watering task and one fertilizing task.
-        - Keep title short and actionable.
-        - explanation must mention city/region climate and current season, plus watering and fertilizing frequency.
-        - explanation should sound friendly and conversational, in 1-2 short sentences.
+        PLANT INFORMATION:
+        - Plant name: \(plantName)
+        - Plant type/species: \(plantType)
+        - Environment: \(location)
 
-        Plant name: \(plantName)
-        Plant type: \(plantType)
-        Location: \(location)
+        PERSONALIZATION RULES:
+        
+        1. PLANT-SPECIFIC REQUIREMENTS:
+           - Research the EXACT care needs for "\(plantType)". Different plants have vastly different needs:
+             * Succulents/cacti: infrequent watering (every 2-3 weeks), bright light, well-draining soil
+             * Tropical plants (Monstera, Pothos): frequent watering (every 5-7 days), humidity, indirect light
+             * Ferns: constant moisture, high humidity, low-medium light
+             * Snake plants/ZZ plants: drought-tolerant, infrequent watering (every 2-4 weeks)
+           - Tailor watering frequency, fertilizing schedule, and care tasks to THIS SPECIFIC PLANT TYPE.
+        
+        2. TEMPERATURE & CLIMATE ADAPTATION:
+           - Parse the temperature from the environment info
+           - Higher temperatures = more frequent watering (faster evaporation)
+           - Lower temperatures = less frequent watering (slower growth)
+           - Adjust care frequency based on temperature
+        
+        3. CARE GOAL INTENSITY:
+           - Parse the "Goal" from environment info:
+             * "Relaxed": 3-4 tasks, essentials only (watering, major issues), longer intervals
+             * "Balanced": 5-6 tasks, regular care (watering, fertilizing, rotation, pruning)
+             * "Attentive": 7-8 tasks, detailed care (all of above + humidity checks, pest inspections, leaf cleaning)
+        
+        4. LOCATION-BASED CARE:
+           - Consider the city/region's climate and current season
+           - Mention specific seasonal considerations in the explanation
+        
+        5. TASK VARIETY & TIMING:
+           - Include at least ONE task with dayOffset = 0 (today)
+           - Vary dayOffsets to spread tasks throughout the month (0, 3, 7, 14, 21, 28, etc.)
+           - Include diverse task types based on plant needs:
+             * Watering (frequency varies by plant type)
+             * Fertilizing (timing varies by plant type)
+             * Pruning/trimming (if needed for this species)
+             * Rotating (for even light exposure)
+             * Pest inspection (especially for pest-prone species)
+             * Humidity check (for tropical plants)
+             * Leaf cleaning (for large-leaf plants)
+             * Soil check (for plants sensitive to overwatering)
+        
+        6. NOTES QUALITY:
+           - Each task's "notes" should explain WHY this task matters for THIS SPECIFIC PLANT
+           - Reference the plant's name and botanical characteristics
+           - Be specific, not generic
+        
+        7. EXPLANATION:
+           - Mention the city/region and current season's impact on care
+           - State the specific watering and fertilizing frequency for THIS PLANT TYPE
+           - Reference the care goal (Relaxed/Balanced/Attentive)
+           - Sound warm and conversational (2-3 sentences)
+        
+        EXAMPLE OF GOOD PERSONALIZATION:
+        - For a Monstera in San Francisco with Balanced care goal and 18-24C temp:
+          * Watering every 7 days (tropical plant, moderate temp)
+          * Fertilizing every 28 days during growing season
+          * Weekly leaf cleaning (large leaves collect dust)
+          * Rotation every 14 days (for even growth)
+        
+        - For a Succulent in Phoenix with Relaxed care goal and 24-30C temp:
+          * Watering every 14-21 days (drought-tolerant, high temp increases frequency slightly)
+          * Fertilizing every 60 days (slow grower)
+          * Occasional soil check (prevent overwatering)
+        
+        Generate a plan that someone would IMMEDIATELY recognize as tailored to their specific plant, not a generic template.
         """
 
         let requestBody = GeminiRequest(contents: [
