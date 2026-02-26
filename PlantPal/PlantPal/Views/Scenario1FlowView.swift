@@ -200,7 +200,7 @@ struct Scenario1FlowView: View {
         case .collectTemperature(let name, let type, let placement, let city):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("Last one: do you want a low-maintenance plan, balanced plan, or growth-focused plan?", plantName: name)
+            addAssistantMessage("Last one: what kind of care plan do you prefer?\n\n• Relaxed — just the essentials, great if you're busy\n\n• Balanced — regular watering, soil checks, and rotation\n\n• Attentive — more frequent care to help your plant thrive", plantName: name)
             setupStep = .collectCareGoal(
                 name: name,
                 type: type,
@@ -287,21 +287,21 @@ struct Scenario1FlowView: View {
                 isSending = false
                 return
             }
-            addAssistantMessage("How hands-on do you want the plan to be? (Conservative / Balanced / Hands-off)", plantName: plantName)
+            addAssistantMessage("How should I handle the adjusted schedule?\n\n• Relaxed — spread tasks out, less pressure when you're back\n\n• Balanced — resume at a normal pace\n\n• Attentive — catch up quickly, tasks grouped closer together", plantName: plantName)
             setupStep = .adjustAskPlanStyle(plantName: plantName)
             isSending = false
         case .adjustAskPlanStyle(let plantName):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: plantName)
             let lower = trimmed.lowercased()
-            if lower.contains("conservative") {
-                updateAdjustmentIntake { $0.style = .conservative }
+            if lower.contains("relax") {
+                updateAdjustmentIntake { $0.style = .relaxed }
             } else if lower.contains("balanced") {
                 updateAdjustmentIntake { $0.style = .balanced }
-            } else if lower.contains("hands") {
-                updateAdjustmentIntake { $0.style = .handsOff }
+            } else if lower.contains("attentive") {
+                updateAdjustmentIntake { $0.style = .attentive }
             } else {
-                addAssistantMessage("Please choose conservative, balanced, or hands-off.", plantName: plantName)
+                addAssistantMessage("Please choose one: Relaxed, Balanced, or Attentive.", plantName: plantName)
                 isSending = false
                 return
             }
@@ -576,11 +576,17 @@ struct Scenario1FlowView: View {
             ]
         case .adjustAskHelperAvailability:
             return ["Yes", "No"]
+        case .collectCareGoal:
+            return [
+                "Relaxed",
+                "Balanced",
+                "Attentive"
+            ]
         case .adjustAskPlanStyle:
             return [
-                "Conservative (avoid underwater)",
+                "Relaxed",
                 "Balanced",
-                "Hands-off (minimal actions)"
+                "Attentive"
             ]
         case .adjustAskTimingPreference:
             return [
@@ -737,9 +743,9 @@ struct Scenario1FlowView: View {
         }
         if let style = intake.style {
             switch style {
-            case .conservative: parts.append("User prefers conservative (avoid underwatering).")
-            case .balanced: parts.append("User prefers balanced approach.")
-            case .handsOff: parts.append("User prefers hands-off (minimal actions).")
+            case .relaxed: parts.append("User prefers a relaxed plan (spread out, less pressure).")
+            case .balanced: parts.append("User prefers a balanced approach (normal pace).")
+            case .attentive: parts.append("User prefers an attentive plan (catch up quickly, more care).")
             }
         }
         if let early = intake.preferEarly {
@@ -885,11 +891,11 @@ struct Scenario1FlowView: View {
 
     private func spacingDays(for style: AdjustmentStyle) -> Int {
         switch style {
-        case .conservative:
+        case .attentive:
             return 1
         case .balanced:
             return 1
-        case .handsOff:
+        case .relaxed:
             return 2
         }
     }
@@ -1011,9 +1017,9 @@ private enum AdjustmentChangeType {
 }
 
 private enum AdjustmentStyle {
-    case conservative
+    case relaxed
     case balanced
-    case handsOff
+    case attentive
 }
 
 private struct AdjustmentIntake {
