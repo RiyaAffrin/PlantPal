@@ -180,6 +180,74 @@ struct GeminiService {
         return try parseSchedulePlan(from: text)
     }
 
+    /// Free-form Q&A: answers plant questions using plant context and conversation history
+    func answerPlantQuestion(question: String, plantContext: String, recentConversation: String) async throws -> String {
+        guard let apiKey = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String,
+              !apiKey.isEmpty, !apiKey.hasPrefix("<#") else {
+            throw GeminiError(message: "Missing GEMINI_API_KEY. Set it in Secrets.xcconfig.")
+        }
+
+        var prompt = """
+        You are PlantPal, a friendly and knowledgeable plant care advisor.
+
+        RULES:
+        - Answer the user's question with specific, actionable advice.
+        - If plant context is provided, base your answer on the specific plant's needs, environment, and current care schedule.
+        - If the user asks a general question and you know which plants they own, tailor your answer to their specific plants.
+        - If you believe the care plan should be adjusted:
+          * State CLEARLY what change you recommend (e.g., "reduce watering from every 5 days to every 7 days").
+          * Explain whether this is a short-term fix (with duration, e.g., "2-3 weeks") or a permanent change, and why.
+          * Tell the user: You can use "Modify current care plan" to apply this change.
+        - Do NOT make any changes yourself. Only provide advice and suggestions.
+        - Be warm and conversational. Reference plant species with botanical reasoning.
+        - Keep your response concise (3-6 sentences). No markdown.
+        """
+
+        if !plantContext.isEmpty {
+            prompt += "\n\nPlant context:\n\(plantContext)"
+        }
+
+        prompt += "\n\nUser's question: \(question)"
+
+        if !recentConversation.isEmpty {
+            prompt += "\n\nRecent conversation:\n\(recentConversation)"
+        }
+
+        print("[PlantPal] Question prompt length: \(prompt.count) chars")
+
+        let requestBody = GeminiRequest(contents: [
+            GeminiContent(role: "user", parts: [GeminiPart(text: prompt)])
+        ])
+
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(modelName):generateContent?key=\(apiKey)") else {
+            throw GeminiError(message: "Invalid Gemini endpoint")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(requestBody)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        if let http = response as? HTTPURLResponse {
+            print("[PlantPal] Question API status: \(http.statusCode)")
+            if !(200...299).contains(http.statusCode) {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("[PlantPal] Question API error body: \(body)")
+                throw GeminiError(message: "Gemini API error: HTTP \(http.statusCode)")
+            }
+        }
+
+        let decoded = try JSONDecoder().decode(GeminiResponse.self, from: data)
+        guard let text = decoded.candidates.first?.content.parts.first?.text else {
+            let raw = String(data: data, encoding: .utf8) ?? "nil"
+            print("[PlantPal] No candidates in response: \(raw)")
+            throw GeminiError(message: "No response text from Gemini")
+        }
+        return text
+    }
+
     /// Generates explanation for why a specific schedule change was proposed
     func generateBatchWhyExplanations(context: String, questions: [String]) async throws -> [String] {
         let numberedQuestions = questions.joined(separator: "\n")

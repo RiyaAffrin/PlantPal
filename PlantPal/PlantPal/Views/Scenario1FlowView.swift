@@ -224,6 +224,20 @@ struct Scenario1FlowView: View {
                 setupStep = .awaitingIntent
                 isSending = false
             }
+        case .askingQuestion(let currentPlantName):
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            let identifiedPlant = identifyPlant(from: trimmed) ?? currentPlantName
+            let plantLabel = identifiedPlant ?? "PlantPal"
+            persistMessage(role: "user", content: trimmed, plantName: plantLabel)
+
+            if identifiedPlant != currentPlantName {
+                setupStep = .askingQuestion(plantName: identifiedPlant)
+            }
+
+            Task {
+                await answerQuestion(trimmed, identifiedPlant: identifiedPlant, plantLabel: plantLabel)
+                isSending = false
+            }
         case .adjustAskPlantName:
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
@@ -362,11 +376,16 @@ struct Scenario1FlowView: View {
             setupStep = .collectPlantName
             return
         }
-        if lower.contains("question") {
+        if lower.contains("question") || lower.contains("ask about") {
             pendingAdjustmentDraft = nil
             adjustmentPreview = nil
-            addAssistantMessage("Sure. Which plant is this about?", plantName: "PlantPal")
-            setupStep = .collectPlantName
+            if profiles.isEmpty {
+                addAssistantMessage("What would you like to know? You can ask about general plant care.", plantName: "PlantPal")
+            } else {
+                let names = profiles.map(\.name).joined(separator: ", ")
+                addAssistantMessage("What would you like to know? You can ask about \(names) or general plant care.", plantName: "PlantPal")
+            }
+            setupStep = .askingQuestion(plantName: nil)
             return
         }
         if lower.contains("modify") {
@@ -625,6 +644,102 @@ struct Scenario1FlowView: View {
 
     private func normalizedPlantName(from raw: String) -> String? {
         profiles.first(where: { $0.name.caseInsensitiveCompare(raw) == .orderedSame })?.name
+    }
+
+    /// Matches user input against known plant names and types
+    private func identifyPlant(from text: String) -> String? {
+        let lower = text.lowercased()
+        if let match = profiles.first(where: {
+            lower.contains($0.name.lowercased()) || lower.contains($0.type.lowercased())
+        }) {
+            return match.name
+        }
+        if profiles.count == 1 {
+            return profiles.first?.name
+        }
+        return nil
+    }
+
+    /// Builds context from profile, memory, summary, and current tasks for question mode
+    private func buildQuestionContext(for plantName: String) -> String? {
+        var parts: [String] = []
+
+        if let profile = profiles.first(where: { $0.name.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            parts.append("Plant: \(profile.name), type: \(profile.type), location: \(profile.location).")
+        }
+
+        if let memory = memories.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            if let freq = memory.wateringFrequencyDays {
+                parts.append("Watering frequency: every \(freq) days.")
+            }
+            if let light = memory.lightPreference {
+                parts.append("Light/environment: \(light).")
+            }
+            if let reason = memory.latestAdjustmentReason {
+                parts.append("Latest adjustment: \(reason).")
+            }
+        }
+
+        if let summary = summaries.first(where: { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }) {
+            parts.append("Chat history summary: \(summary.summary)")
+        }
+
+        let plantTasks = allTasks
+            .filter { $0.plantName.caseInsensitiveCompare(plantName) == .orderedSame }
+            .sorted { $0.dueDate < $1.dueDate }
+        if !plantTasks.isEmpty {
+            let taskList = plantTasks.map { "- \($0.title): \(taskDateLabel($0.dueDate))" }.joined(separator: "\n")
+            parts.append("Current care schedule:\n\(taskList)")
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Brief summary of ALL user's plants — used when no specific plant is identified
+    private func buildGeneralPlantContext() -> String {
+        guard !profiles.isEmpty else { return "" }
+        var parts: [String] = ["User's plants:"]
+        for profile in profiles {
+            var info = "- \(profile.name) (\(profile.type), \(profile.location))"
+            if let memory = memories.first(where: { $0.plantName.caseInsensitiveCompare(profile.name) == .orderedSame }) {
+                if let freq = memory.wateringFrequencyDays {
+                    info += ", watering every \(freq) days"
+                }
+            }
+            let taskCount = allTasks.filter { $0.plantName.caseInsensitiveCompare(profile.name) == .orderedSame }.count
+            if taskCount > 0 {
+                info += ", \(taskCount) scheduled tasks"
+            }
+            parts.append(info)
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Handles the full question-answer cycle: builds context, calls Gemini, shows response
+    private func answerQuestion(_ question: String, identifiedPlant: String?, plantLabel: String) async {
+        let context: String
+        if let plantName = identifiedPlant {
+            context = buildQuestionContext(for: plantName) ?? buildGeneralPlantContext()
+        } else {
+            context = buildGeneralPlantContext()
+        }
+
+        let recentMessages = chatMessages.suffix(10)
+            .map { "\($0.role == .user ? "User" : "PlantPal"): \($0.text)" }
+            .joined(separator: "\n")
+
+        do {
+            let answer = try await GeminiService().answerPlantQuestion(
+                question: question,
+                plantContext: context,
+                recentConversation: recentMessages
+            )
+            addAssistantMessage(answer, plantName: plantLabel)
+        } catch {
+            print("[PlantPal] Question mode error: \(error)")
+            addAssistantMessage("Sorry, I couldn't process that right now. Please try again.", plantName: plantLabel)
+        }
     }
 
     private func adjustmentContext(for plantName: String) -> String? {
@@ -995,6 +1110,7 @@ private enum SetupStep: Equatable {
     case collectCity(name: String, type: String, placement: String)
     case collectTemperature(name: String, type: String, placement: String, city: String)
     case collectCareGoal(name: String, type: String, placement: String, city: String, temperature: String)
+    case askingQuestion(plantName: String?)
     case adjustAskPlantName
     case adjustAskChangeType(plantName: String)
     case adjustAskDateRange(plantName: String)
@@ -1007,7 +1123,7 @@ private enum SetupStep: Equatable {
 
 private enum SetupIntent: String, CaseIterable {
     case setupNewPlant = "Set up a new plant"
-    case questionNewPlant = "Question about a new plant"
+    case askAboutPlant = "Ask about a plant"
     case modifyCurrentPlan = "Modify current care plan"
 }
 
