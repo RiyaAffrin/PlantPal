@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
+
 
 struct MeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -67,9 +69,38 @@ struct MeView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 }
+                
+                //MARK: Settings
+                Section("Settings"){
+                    Toggle(isOn: $notificationsEnabled){
+                        Label("Notifactions", systemImage: "bell.fill")
+                    }
+                    .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
+                    onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
+                    }
+                    
+                    HStack{
+                        Label("Theme", systemImage: "paintbrush.fill")
+                        Spacer()
+                        Picker("", selection: $selectedTheme){
+                            Text("System").tag("System")
+                            Text("Light").tag("Light")
+                            Text("Dark").tag("Dark")
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                    
+                    NavigationLink{
+                        PrivacyView()
+                    }label: {
+                        Label("Privacy", systemImage: "hand.raised.fill")
+                    }
+                }
 
+                
                 // MARK: My Plants
-                Section("My Plants") {
+                Section(header: Text("My Plants"), footer: Text("Swipe left on a plant to remove it.")) {
                     if plants.isEmpty {
                         Text("No plants yet. Add one in Setup.")
                             .font(.subheadline)
@@ -158,7 +189,7 @@ struct MeView: View {
                     }
                 }
             }
-            .navigationTitle("Me")
+            .navigationTitle("Profile")
         }
         .alert("Gemini", isPresented: $showGeminiAlert) {
             Button("OK", role: .cancel) {}

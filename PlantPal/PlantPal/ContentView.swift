@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var selectedTab = 0
     @State private var chatResetTrigger = 0
+    @AppStorage("selectedTheme") private var selectedTheme: String = "System"
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -22,9 +23,10 @@ struct ContentView: View {
                 .tag(2)
 
             MeView()
-                .tabItem { Label("Me", systemImage: "person.crop.circle") }
+                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                 .tag(3)
         }
+        .preferredColorScheme(selectedTheme == "Light" ? .light : selectedTheme == "Dark" ? .dark : nil)
     }
 }
 
