@@ -14,7 +14,7 @@ struct HomeView: View {
                     .background(Color(red: 0.86, green: 0.97, blue: 0.84))
                     .clipShape(RoundedRectangle(cornerRadius: 24))
 
-                Text("We’ll create a simple schedule you can follow.")
+                Text("Tell us about your plant and we'll take care of the rest.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
