@@ -76,8 +76,8 @@ struct MeView: View {
                         Label("Notifactions", systemImage: "bell.fill")
                     }
                     .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
-                    onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
-                    }
+                    // onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
+                    // }
                     
                     HStack{
                         Label("Theme", systemImage: "paintbrush.fill")
