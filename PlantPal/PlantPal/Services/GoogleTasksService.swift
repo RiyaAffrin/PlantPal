@@ -119,8 +119,8 @@ struct GoogleTasksService {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 throw TasksAPIError(message: "Google Tasks list error: HTTP \(http.statusCode) - \(text)")
             }
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]] else { break }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { break }
+            let items = json["items"] as? [[String: Any]] ?? []
             for item in items {
                 guard let id = item["id"] as? String,
                       let status = item["status"] as? String else { continue }

@@ -6,6 +6,7 @@ struct TodayView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject private var googleAuth: GoogleAuthManager
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query private var referencePhotos: [PlantReferencePhoto]
@@ -15,9 +16,20 @@ struct TodayView: View {
     @State private var showCheckInPhotoSource = false
     @State private var showCamera = false
     @State private var showPhotoPicker = false
+    
+    @State private var checkInPhotoPromptPlantName: String?
+    
+    @State private var checkInContextPlantName: String?
+    
+    @State private var listRefreshID = UUID()
 
     private var todaysTasks: [CareTask] {
         tasks.filter { Calendar.current.isDateInToday($0.dueDate) }
+    }
+
+
+    private func todaysTasks(for plantName: String) -> [CareTask] {
+        todaysTasks.filter { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
     }
 
     private var primaryPlantName: String? {
@@ -86,7 +98,6 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // shown once at least one plant exists
     private var taskListView: some View {
         List {
             Section("Today") {
@@ -188,6 +199,7 @@ struct TodayView: View {
                         Divider()
                         Button("Cancel", role: .cancel) {
                             showCheckInPhotoSource = false
+                            checkInContextPlantName = nil
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
@@ -207,7 +219,11 @@ struct TodayView: View {
                 }
             }
         }
+        .id(listRefreshID)
         .navigationTitle("Care Today")
+        .refreshable {
+            await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() })
+        }
         .sheet(isPresented: $showCamera) {
             CameraImagePicker(imageData: $checkInNewPhotoData)
         }
@@ -247,7 +263,42 @@ struct TodayView: View {
             }
         }
         .task(id: googleAuth.isSignedIn) {
-            await syncCompletionFromGoogle()
+            await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() })
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == 0 {
+                Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+            }
+        }
+        .onAppear {
+            Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+        }
+        .alert("今日任务都完成啦", isPresented: Binding(
+            get: { checkInPhotoPromptPlantName != nil },
+            set: { if !$0 { checkInPhotoPromptPlantName = nil } }
+        )) {
+            Button("拍照记录") {
+                if let plant = checkInPhotoPromptPlantName {
+                    checkInContextPlantName = plant
+                    checkInPhotoPromptPlantName = nil
+                    showCheckInPhotoSource = true
+                }
+            }
+            Button("稍后", role: .cancel) {
+                checkInPhotoPromptPlantName = nil
+            }
+        } message: {
+            if let plant = checkInPhotoPromptPlantName {
+                Text("给 \(plant) 拍一张照片做 check-in 吧？")
+            }
         }
     }
 
@@ -268,7 +319,8 @@ struct TodayView: View {
 
     /// When user has selected a response, save the new photo (if any) as the reference for next check-in.
     private func saveCheckInPhotoIfNeeded() {
-        guard let plantName = primaryPlantName, let data = checkInNewPhotoData, !data.isEmpty else {
+        let plantName = checkInContextPlantName ?? primaryPlantName
+        guard let plantName, let data = checkInNewPhotoData, !data.isEmpty else {
             checkInNewPhotoData = nil
             checkInSelectedPhotoItem = nil
             return
@@ -283,10 +335,19 @@ struct TodayView: View {
         }
         checkInNewPhotoData = nil
         checkInSelectedPhotoItem = nil
+        checkInContextPlantName = nil
     }
 
     private func toggleComplete(_ task: CareTask) {
+        let wasCompleted = task.isCompleted
         task.isCompleted.toggle()
+        
+        if !wasCompleted && task.isCompleted {
+            let forPlant = todaysTasks(for: task.plantName)
+            if !forPlant.isEmpty && forPlant.allSatisfy(\.isCompleted) {
+                checkInPhotoPromptPlantName = task.plantName
+            }
+        }
         Task { await syncCompletionToGoogle(task) }
     }
 
@@ -301,16 +362,20 @@ struct TodayView: View {
         }
     }
 
-    /// Google → App: on appear, fetch Google Tasks completion status and update local CareTasks.
-    private func syncCompletionFromGoogle() async {
+
+    private func syncCompletionFromGoogle(afterSync: (@Sendable () -> Void)? = nil) async {
         guard googleAuth.isSignedIn, let token = googleAuth.accessToken else { return }
         do {
             let statusMap = try await GoogleTasksService().fetchTasksStatus(accessToken: token)
-            for task in tasks where task.googleEventId != nil {
-                guard let id = task.googleEventId, let completed = statusMap[id] else { continue }
-                if task.isCompleted != completed {
-                    task.isCompleted = completed
+            await MainActor.run {
+                for task in tasks where task.googleEventId != nil {
+                    guard let id = task.googleEventId, let completed = statusMap[id] else { continue }
+                    if task.isCompleted != completed {
+                        task.isCompleted = completed
+                    }
                 }
+                try? modelContext.save()
+                afterSync?()
             }
         } catch {
             // Optionally surface error

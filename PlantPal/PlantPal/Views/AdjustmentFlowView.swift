@@ -197,8 +197,13 @@ struct MeView: View {
             Button("Cancel", role: .cancel) { plantToDelete = nil }
             Button("Delete", role: .destructive) {
                 if let plant = plantToDelete {
-                    deletePlantAndRelatedData(plant)
-                    plantToDelete = nil
+                    Task {
+                        await deleteGoogleTasksForPlant(plant)
+                        await MainActor.run {
+                            deletePlantAndRelatedData(plant)
+                            plantToDelete = nil
+                        }
+                    }
                 }
             }
         } message: {
@@ -254,6 +259,18 @@ private extension MeView {
         summaries.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         memories.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         allTasks.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+    }
+
+    /// Deletes this plant's tasks from Google Tasks (by googleEventId) before local deletion.
+    func deleteGoogleTasksForPlant(_ plant: PlantProfile) async {
+        let name = plant.name
+        let taskIds = allTasks
+            .filter { $0.plantName.localizedCaseInsensitiveCompare(name) == .orderedSame }
+            .compactMap(\.googleEventId)
+            .filter { !$0.isEmpty }
+        guard !taskIds.isEmpty, let token = googleAuth.accessToken else { return }
+        let service = GoogleTasksService()
+        try? await service.deleteTasks(ids: taskIds, accessToken: token)
     }
 
     func connectGemini() {

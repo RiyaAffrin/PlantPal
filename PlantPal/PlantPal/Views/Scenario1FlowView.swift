@@ -391,6 +391,12 @@ struct Scenario1FlowView: View {
         if lower.contains("modify") {
             pendingAdjustmentDraft = nil
             adjustmentPreview = nil
+            // When user has no plants, prompt them to start a new chat to set up a new plant.
+            if profiles.isEmpty {
+                addAssistantMessage("You currently have no plant care schedule to modify. Start a new chat to set up a new plant.", plantName: "PlantPal")
+                setupStep = .awaitingIntent
+                return
+            }
             if let plantName = suggestedPlantForAdjustment() {
                 adjustmentIntake = AdjustmentIntake(plantName: plantName)
                 addAssistantMessage("Great. I can modify \(plantName)'s current care plan.", plantName: plantName)
