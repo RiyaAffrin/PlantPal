@@ -70,35 +70,6 @@ struct MeView: View {
                     .padding(.vertical, 12)
                 }
                 
-                //MARK: Settings
-                Section("Settings"){
-                    Toggle(isOn: $notificationsEnabled){
-                        Label("Notifactions", systemImage: "bell.fill")
-                    }
-                    .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
-                    // onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
-                    // }
-                    
-                    HStack{
-                        Label("Theme", systemImage: "paintbrush.fill")
-                        Spacer()
-                        Picker("", selection: $selectedTheme){
-                            Text("System").tag("System")
-                            Text("Light").tag("Light")
-                            Text("Dark").tag("Dark")
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    }
-                    
-                    NavigationLink{
-                        PrivacyView()
-                    }label: {
-                        Label("Privacy", systemImage: "hand.raised.fill")
-                    }
-                }
-
-                
                 // MARK: My Plants
                 Section(header: Text("My Plants"), footer: Text("Swipe left on a plant to remove it.")) {
                     if plants.isEmpty {
@@ -181,6 +152,24 @@ struct MeView: View {
 
                 // MARK: About
                 Section("About") {
+                    HStack{
+                        Label("Theme", systemImage: "paintbrush.fill")
+                        Spacer()
+                        Picker("", selection: $selectedTheme){
+                            Text("System").tag("System")
+                            Text("Light").tag("Light")
+                            Text("Dark").tag("Dark")
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                    
+                    NavigationLink{
+                        PrivacyView()
+                    }label: {
+                        Label("Privacy", systemImage: "hand.raised.fill")
+                    }
+                    
                     HStack {
                         Label("Version", systemImage: "info.circle")
                         Spacer()
