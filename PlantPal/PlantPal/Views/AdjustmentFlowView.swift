@@ -114,7 +114,9 @@ struct MeView: View {
                 #if DEBUG
                 Section("Debug") {
                     Button("Clear All Data", role: .destructive) {
-                        clearAllData()
+                        Task {
+                            await clearAllData()
+                        }
                     }
                 }
                 #endif
@@ -244,7 +246,8 @@ struct PrivacyView: View {
 }
 
 private extension MeView {
-    func clearAllData() {
+    func clearAllData() async {
+        await deleteGoogleTasks(ids: allTasks.compactMap(\.googleEventId))
         plants.forEach { modelContext.delete($0) }
         messages.forEach { modelContext.delete($0) }
         summaries.forEach { modelContext.delete($0) }
@@ -268,9 +271,34 @@ private extension MeView {
             .filter { $0.plantName.localizedCaseInsensitiveCompare(name) == .orderedSame }
             .compactMap(\.googleEventId)
             .filter { !$0.isEmpty }
-        guard !taskIds.isEmpty, let token = googleAuth.accessToken else { return }
-        let service = GoogleTasksService()
-        try? await service.deleteTasks(ids: taskIds, accessToken: token)
+        await deleteGoogleTasks(ids: taskIds)
+    }
+
+    func deleteGoogleTasks(ids: [String]) async {
+        let taskIds = ids.filter { !$0.isEmpty }
+        guard !taskIds.isEmpty else { return }
+        guard let token = await resolveGoogleAccessTokenForDeletion() else {
+            calendarStatusMessage = "Could not delete Google Tasks because Google is not connected."
+            showCalendarAlert = true
+            return
+        }
+        do {
+            try await GoogleTasksService().deleteTasks(ids: taskIds, accessToken: token)
+        } catch {
+            calendarStatusMessage = "Failed to delete some Google Tasks: \(error.localizedDescription)"
+            showCalendarAlert = true
+        }
+    }
+
+    func resolveGoogleAccessTokenForDeletion() async -> String? {
+        if let token = googleAuth.accessToken, !token.isEmpty {
+            return token
+        }
+        await googleAuth.restorePreviousSignIn()
+        if let token = googleAuth.accessToken, !token.isEmpty {
+            return token
+        }
+        return nil
     }
 
     func connectGemini() {

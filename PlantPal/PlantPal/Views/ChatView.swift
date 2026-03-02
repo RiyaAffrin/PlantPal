@@ -4,6 +4,7 @@ import SwiftData
 struct ChatView: View {
     var onStartChat: () -> Void = {}
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var googleAuth: GoogleAuthManager
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \ChatMessage.createdAt, order: .forward) private var messages: [ChatMessage]
     @Query(sort: \ConversationSummary.updatedAt, order: .reverse) private var summaries: [ConversationSummary]
@@ -92,12 +93,17 @@ struct ChatView: View {
                 Button("Cancel", role: .cancel) { threadToDelete = nil }
                 Button("Delete", role: .destructive) {
                     if let thread = threadToDelete {
-                        deleteAllDataForPlant(thread.plantName)
-                        if isInConversation && selectedPlantName == thread.plantName {
-                            isInConversation = false
-                            selectedPlantName = availablePlantNames.first ?? "PlantPal"
+                        Task {
+                            await deleteGoogleTasksForPlant(thread.plantName)
+                            await MainActor.run {
+                                deleteAllDataForPlant(thread.plantName)
+                                if isInConversation && selectedPlantName == thread.plantName {
+                                    isInConversation = false
+                                    selectedPlantName = availablePlantNames.first ?? "PlantPal"
+                                }
+                                threadToDelete = nil
+                            }
                         }
-                        threadToDelete = nil
                     }
                 }
             } message: {
@@ -451,6 +457,21 @@ struct ChatView: View {
         allTasks.filter { $0.plantName == plantName }.forEach { modelContext.delete($0) }
     }
 
+    private func deleteGoogleTasksForPlant(_ plantName: String) async {
+        let ids = allTasks
+            .filter { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
+            .compactMap(\.googleEventId)
+            .filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return }
+        var token = googleAuth.accessToken
+        if token == nil {
+            await googleAuth.restorePreviousSignIn()
+            token = googleAuth.accessToken
+        }
+        guard let token else { return }
+        try? await GoogleTasksService().deleteTasks(ids: ids, accessToken: token)
+    }
+
     private func resetPlant() {
         let targetPlant = selectedPlantName
         deleteAllDataForPlant(targetPlant)
@@ -571,6 +592,7 @@ struct MessageBubble: View {
 
 #Preview {
     ChatView(onStartChat: {})
+        .environmentObject(GoogleAuthManager())
         .modelContainer(for: [
             PlantProfile.self,
             ChatMessage.self,
