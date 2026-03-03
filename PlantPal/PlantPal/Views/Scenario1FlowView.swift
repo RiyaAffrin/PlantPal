@@ -241,9 +241,9 @@ struct Scenario1FlowView: View {
                 isSending = false
             }
         case .adjustAskPlantName:
-            chatMessages.append(SetupMessage(role: .user, text: trimmed))
-            persistMessage(role: "user", content: trimmed, plantName: "PlantPal")
             let plantName = normalizedPlantName(from: trimmed) ?? trimmed
+            chatMessages.append(SetupMessage(role: .user, text: trimmed))
+            persistMessage(role: "user", content: trimmed, plantName: plantName)
             adjustmentIntake = AdjustmentIntake(plantName: plantName)
             addAssistantMessage("Got it. Do you need a short-term change or a long-term change?", plantName: plantName)
             if let context = adjustmentContext(for: plantName) {
@@ -393,22 +393,12 @@ struct Scenario1FlowView: View {
         if lower.contains("modify") {
             pendingAdjustmentDraft = nil
             adjustmentPreview = nil
-            // When user has no plants, prompt them to start a new chat to set up a new plant.
-            if profiles.isEmpty {
+
+            if availablePlantNamesForAdjustment().isEmpty {
                 addAssistantMessage("You currently have no plant care schedule to modify. Start a new chat to set up a new plant.", plantName: "PlantPal")
                 setupStep = .awaitingIntent
-                return
-            }
-            if let plantName = suggestedPlantForAdjustment() {
-                adjustmentIntake = AdjustmentIntake(plantName: plantName)
-                addAssistantMessage("Great. I can modify \(plantName)'s current care plan.", plantName: plantName)
-                if let context = adjustmentContext(for: plantName) {
-                    addAssistantMessage(context, plantName: plantName)
-                }
-                addAssistantMessage("What would you like to change today? Short-term or long-term?", plantName: plantName)
-                setupStep = .adjustAskChangeType(plantName: plantName)
             } else {
-                addAssistantMessage("Okay. Which plant's plan should I modify?", plantName: "PlantPal")
+                addAssistantMessage("Which plant's care plan would you like to modify?", plantName: "PlantPal")
                 setupStep = .adjustAskPlantName
             }
             return
@@ -596,6 +586,9 @@ struct Scenario1FlowView: View {
 
     private var optionsForCurrentStep: [String]? {
         switch setupStep {
+        case .adjustAskPlantName:
+            let names = availablePlantNamesForAdjustment()
+            return names.isEmpty ? nil : names
         case .adjustAskChangeType:
             return [
                 "Short-term change (for a specific period)",
@@ -631,16 +624,24 @@ struct Scenario1FlowView: View {
     }
 
     private func suggestedPlantForAdjustment() -> String? {
-        if profiles.count == 1 {
-            return profiles.first?.name
+        availablePlantNamesForAdjustment().first
+    }
+
+    private func availablePlantNamesForAdjustment() -> [String] {
+        var set = Set<String>()
+        for profile in profiles {
+            set.insert(profile.name)
         }
-        if let fromMemory = memories.first?.plantName {
-            return fromMemory
+        for memory in memories {
+            set.insert(memory.plantName)
         }
-        if let fromSummary = summaries.first?.plantName {
-            return fromSummary
+        for summary in summaries {
+            set.insert(summary.plantName)
         }
-        return nil
+        for task in allTasks {
+            set.insert(task.plantName)
+        }
+        return Array(set).sorted()
     }
 
     private func reassignMessages(from oldName: String, to newName: String) {
