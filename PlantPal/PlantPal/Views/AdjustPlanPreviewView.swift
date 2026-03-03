@@ -47,12 +47,8 @@ struct AdjustPlanPreviewView: View {
             Text("Review Changes")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
 
-            HStack(alignment: .top, spacing: 14) {
-                taskColumn(title: "Current care plan", tasks: draft.currentTasks, isProposed: false)
-                Divider()
-                taskColumn(title: "Proposed care plan", tasks: draft.proposedTasks, isProposed: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            proposedPlanList
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if let whyId = expandedWhyId,
                let change = draft.changes.first(where: { $0.id == whyId }) {
@@ -157,20 +153,29 @@ struct AdjustPlanPreviewView: View {
         .padding()
     }
 
-    // Task columns
-
-    private func taskColumn(title: String, tasks: [PendingCareTask], isProposed: Bool) -> some View {
+    // Proposed tasks list (with inline change markers)
+    private var proposedPlanList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Text("Proposed care plan")
                 .font(.headline)
-                .foregroundStyle(isProposed ? .green : .primary)
+                .foregroundStyle(.green)
 
-            ForEach(tasks) { task in
+            ForEach(draft.proposedTasks) { task in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("• \(taskDateText(task.dueDate)) - \(task.title)")
+                    if let change = draft.changes.first(where: { $0.proposedTask == task }) {
+                        HStack(spacing: 4) {
+                            Text("•")
+                            Text(taskDateText(change.originalTask.dueDate))
+                                .strikethrough()
+                                .foregroundStyle(.secondary)
+                            Text("→")
+                            Text(taskDateText(change.proposedTask.dueDate))
+                                .bold()
+                            Text("-")
+                            Text(change.proposedTask.title)
+                        }
                         .font(.subheadline)
 
-                    if isProposed, let change = draft.changes.first(where: { $0.proposedTask == task }) {
                         HStack(spacing: 8) {
                             Button("EDIT") {
                                 withAnimation {
@@ -193,6 +198,9 @@ struct AdjustPlanPreviewView: View {
                             .tint(.green)
                             .font(.caption)
                         }
+                    } else {
+                        Text("• \(taskDateText(task.dueDate)) - \(task.title)")
+                            .font(.subheadline)
                     }
                 }
             }
