@@ -52,7 +52,8 @@ struct Scenario1FlowView: View {
                             OptionCard(options: SetupIntent.allCases.map(\.rawValue)) { selected in
                                 handleIntentSelection(selected)
                             }
-                            .frame(maxWidth: 340)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 36)
                         }
 
                         if let options = optionsForCurrentStep {
@@ -60,7 +61,8 @@ struct Scenario1FlowView: View {
                                 inputText = selected
                                 handleSend()
                             }
-                            .frame(maxWidth: 340)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 36)
                         }
 
                         if let plan = planReadyForReview {

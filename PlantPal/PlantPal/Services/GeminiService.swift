@@ -132,7 +132,12 @@ struct GeminiService {
            - Reference the plant's name and botanical characteristics
            - Be specific, not generic
         
-        7. EXPLANATION:
+        7. USER-FRIENDLY FREQUENCY LANGUAGE:
+           - When describing schedules, prefer human-readable phrases:
+             * Use wording like \"every 3 weeks\" instead of \"every 21 days\"
+             * Use small ranges like \"every 1-2 weeks\" when the exact interval is flexible
+        
+        8. EXPLANATION:
            - Mention the city/region and current season's impact on care
            - State the specific watering and fertilizing frequency for THIS PLANT TYPE
            - Reference the care goal (Relaxed/Balanced/Attentive)
