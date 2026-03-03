@@ -200,7 +200,7 @@ struct Scenario1FlowView: View {
         case .collectTemperature(let name, let type, let placement, let city):
             chatMessages.append(SetupMessage(role: .user, text: trimmed))
             persistMessage(role: "user", content: trimmed, plantName: name)
-            addAssistantMessage("Last one: what kind of care plan do you prefer?\n\n• Relaxed — just the essentials, great if you're busy\n\n• Balanced — regular watering, soil checks, and rotation\n\n• Attentive — more frequent care to help your plant thrive", plantName: name)
+            addAssistantMessage("Last one: what kind of care plan do you prefer?", plantName: name)
             setupStep = .collectCareGoal(
                 name: name,
                 type: type,
@@ -301,7 +301,7 @@ struct Scenario1FlowView: View {
                 isSending = false
                 return
             }
-            addAssistantMessage("How should I handle the adjusted schedule?\n\n• Relaxed — spread tasks out, less pressure when you're back\n\n• Balanced — resume at a normal pace\n\n• Attentive — catch up quickly, tasks grouped closer together", plantName: plantName)
+            addAssistantMessage("How should I handle the adjusted schedule?", plantName: plantName)
             setupStep = .adjustAskPlanStyle(plantName: plantName)
             isSending = false
         case .adjustAskPlanStyle(let plantName):
@@ -603,15 +603,15 @@ struct Scenario1FlowView: View {
             return ["Yes", "No"]
         case .collectCareGoal:
             return [
-                "Relaxed",
-                "Balanced",
-                "Attentive"
+                "Relaxed — just the essentials, great if you're busy",
+                "Balanced — regular watering, soil checks, and rotation",
+                "Attentive — more frequent care to help your plant thrive"
             ]
         case .adjustAskPlanStyle:
             return [
-                "Relaxed",
-                "Balanced",
-                "Attentive"
+                "Relaxed — spread tasks out, less pressure when you're back",
+                "Balanced — resume at a normal pace",
+                "Attentive — catch up quickly, tasks grouped closer together"
             ]
         case .adjustAskTimingPreference:
             return [
