@@ -281,23 +281,23 @@ struct TodayView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
         }
-        .alert("今日任务都完成啦", isPresented: Binding(
+        .alert("All of today's tasks are done!", isPresented: Binding(
             get: { checkInPhotoPromptPlantName != nil },
             set: { if !$0 { checkInPhotoPromptPlantName = nil } }
         )) {
-            Button("拍照记录") {
+            Button("Take photo") {
                 if let plant = checkInPhotoPromptPlantName {
                     checkInContextPlantName = plant
                     checkInPhotoPromptPlantName = nil
                     showCheckInPhotoSource = true
                 }
             }
-            Button("稍后", role: .cancel) {
+            Button("Later", role: .cancel) {
                 checkInPhotoPromptPlantName = nil
             }
         } message: {
             if let plant = checkInPhotoPromptPlantName {
-                Text("给 \(plant) 拍一张照片做 check-in 吧？")
+                Text("Take a photo of \(plant) for check-in?")
             }
         }
     }
@@ -343,8 +343,8 @@ struct TodayView: View {
         task.isCompleted.toggle()
         
         if !wasCompleted && task.isCompleted {
-            let forPlant = todaysTasks(for: task.plantName)
-            if !forPlant.isEmpty && forPlant.allSatisfy(\.isCompleted) {
+            // Only prompt for photo when the LAST task on the entire care schedule (all of today's tasks) is complete.
+            if !todaysTasks.isEmpty && todaysTasks.allSatisfy(\.isCompleted) {
                 checkInPhotoPromptPlantName = task.plantName
             }
         }
