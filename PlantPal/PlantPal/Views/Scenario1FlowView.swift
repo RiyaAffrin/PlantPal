@@ -65,20 +65,6 @@ struct Scenario1FlowView: View {
                             .padding(.horizontal, 36)
                         }
 
-                        if let plan = planReadyForReview {
-                            Button {
-                                pendingPlan = plan
-                                planReadyForReview = nil
-                            } label: {
-                                Text("Review Plan")
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.green)
-                            .frame(maxWidth: 340)
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -86,7 +72,16 @@ struct Scenario1FlowView: View {
 
                 Divider()
 
-                if pendingAdjustmentDraft != nil {
+                if let plan = planReadyForReview {
+                    Button("Review Plan") {
+                        pendingPlan = plan
+                        planReadyForReview = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                } else if pendingAdjustmentDraft != nil {
                     Button("Preview Changes") {
                         adjustmentPreview = pendingAdjustmentDraft
                     }
