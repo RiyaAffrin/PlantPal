@@ -76,8 +76,12 @@ struct MeView: View {
                         Label("Notifications", systemImage: "bell.fill")
                     }
                     .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
+<<<<<<< Updated upstream
                     .onChange(of: notificationsEnabled) { _, newValue in
                         updateNotificationSettings(newValue)
+=======
+                    .onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
+>>>>>>> Stashed changes
                     }
                     
                     
@@ -273,7 +277,10 @@ private extension MeView {
         }
     }
     
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
     func deletePlantAndRelatedData(_ plant: PlantProfile) {
         let name = plant.name
         modelContext.delete(plant)
@@ -282,7 +289,7 @@ private extension MeView {
         memories.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         allTasks.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
     }
-
+    
     func connectGemini() {
         let apiKey = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
         if let apiKey, !apiKey.isEmpty, !apiKey.hasPrefix("<#") {
@@ -292,7 +299,7 @@ private extension MeView {
         }
         showGeminiAlert = true
     }
-
+    
     func connectGoogleCalendar() {
         calendarStatusMessage = "Now connecting Google..."
         Task {
@@ -300,9 +307,11 @@ private extension MeView {
             guard googleAuth.isSignedIn, let _ = googleAuth.accessToken else {
                 return
             }
-
+            
             calendarStatusMessage = "Connected to Google Calendar."
             showCalendarAlert = true
         }
     }
 }
+
+
