@@ -71,13 +71,15 @@ struct MeView: View {
                 }
                 
                 //MARK: Settings
-                Section("Settings"){
-                    Toggle(isOn: $notificationsEnabled){
-                        Label("Notifactions", systemImage: "bell.fill")
+                Section("Settings") {
+                    Toggle(isOn: $notificationsEnabled) {
+                        Label("Notifications", systemImage: "bell.fill")
                     }
                     .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
-                    onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
+                    .onChange(of: notificationsEnabled) { _, newValue in
+                        updateNotificationSettings(newValue)
                     }
+                    
                     
                     HStack{
                         Label("Theme", systemImage: "paintbrush.fill")
@@ -257,6 +259,20 @@ private extension MeView {
         memories.forEach { modelContext.delete($0) }
         allTasks.forEach { modelContext.delete($0) }
     }
+    
+    func updateNotificationSettings(_ enabled: Bool) {
+        if enabled {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+                DispatchQueue.main.async {
+                    notificationsEnabled = granted
+                }
+            }
+        } else {
+            UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+            notificationsEnabled = false
+        }
+    }
+    
 
     func deletePlantAndRelatedData(_ plant: PlantProfile) {
         let name = plant.name
