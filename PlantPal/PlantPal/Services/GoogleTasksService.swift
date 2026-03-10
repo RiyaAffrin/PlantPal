@@ -21,14 +21,18 @@ struct GoogleTasksService {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+            // Use local calendar date so Google shows the same day as the app (avoids timezone off-by-one)
+            let cal = Calendar.current
+            let comps = cal.dateComponents([.year, .month, .day], from: item.dueDate)
+            let dateToSend = cal.date(from: comps) ?? item.dueDate
             let dateFormatter = ISO8601DateFormatter()
-            dateFormatter.formatOptions = [.withFullDate]
-            let dueDate = dateFormatter.string(from: item.dueDate)
+            dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let dueDate = dateFormatter.string(from: dateToSend)
 
             let payload: [String: Any] = [
                 "title": item.title,
                 "notes": item.notes,
-                "due": dueDate + "T00:00:00.000Z",
+                "due": dueDate,
                 "status": "needsAction"
             ]
 
@@ -115,8 +119,8 @@ struct GoogleTasksService {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 throw TasksAPIError(message: "Google Tasks list error: HTTP \(http.statusCode) - \(text)")
             }
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]] else { break }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { break }
+            let items = json["items"] as? [[String: Any]] ?? []
             for item in items {
                 guard let id = item["id"] as? String,
                       let status = item["status"] as? String else { continue }

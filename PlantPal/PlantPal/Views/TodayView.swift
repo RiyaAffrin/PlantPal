@@ -6,6 +6,7 @@ struct TodayView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject private var googleAuth: GoogleAuthManager
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var profiles: [PlantProfile]
     @Query(sort: \CareTask.dueDate, order: .forward) private var tasks: [CareTask]
     @Query private var referencePhotos: [PlantReferencePhoto]
@@ -15,9 +16,20 @@ struct TodayView: View {
     @State private var showCheckInPhotoSource = false
     @State private var showCamera = false
     @State private var showPhotoPicker = false
+    
+    @State private var checkInPhotoPromptPlantName: String?
+    
+    @State private var checkInContextPlantName: String?
+    
+    @State private var listRefreshID = UUID()
 
     private var todaysTasks: [CareTask] {
         tasks.filter { Calendar.current.isDateInToday($0.dueDate) }
+    }
+
+
+    private func todaysTasks(for plantName: String) -> [CareTask] {
+        todaysTasks.filter { $0.plantName.localizedCaseInsensitiveCompare(plantName) == .orderedSame }
     }
 
     private var primaryPlantName: String? {
@@ -86,7 +98,6 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // shown once at least one plant exists
     private var taskListView: some View {
         List {
             Section("Today") {
@@ -188,6 +199,7 @@ struct TodayView: View {
                         Divider()
                         Button("Cancel", role: .cancel) {
                             showCheckInPhotoSource = false
+                            checkInContextPlantName = nil
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
@@ -207,7 +219,11 @@ struct TodayView: View {
                 }
             }
         }
+        .id(listRefreshID)
         .navigationTitle("Care Today")
+        .refreshable {
+            await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() })
+        }
         .sheet(isPresented: $showCamera) {
             CameraImagePicker(imageData: $checkInNewPhotoData)
         }
@@ -247,7 +263,42 @@ struct TodayView: View {
             }
         }
         .task(id: googleAuth.isSignedIn) {
-            await syncCompletionFromGoogle()
+            await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() })
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == 0 {
+                Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+            }
+        }
+        .onAppear {
+            Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await syncCompletionFromGoogle(afterSync: { listRefreshID = UUID() }) }
+        }
+        .alert("All of today's tasks are done!", isPresented: Binding(
+            get: { checkInPhotoPromptPlantName != nil },
+            set: { if !$0 { checkInPhotoPromptPlantName = nil } }
+        )) {
+            Button("Take photo") {
+                if let plant = checkInPhotoPromptPlantName {
+                    checkInContextPlantName = plant
+                    checkInPhotoPromptPlantName = nil
+                    showCheckInPhotoSource = true
+                }
+            }
+            Button("Later", role: .cancel) {
+                checkInPhotoPromptPlantName = nil
+            }
+        } message: {
+            if let plant = checkInPhotoPromptPlantName {
+                Text("Take a photo of \(plant) for check-in?")
+            }
         }
     }
 
@@ -268,7 +319,8 @@ struct TodayView: View {
 
     /// When user has selected a response, save the new photo (if any) as the reference for next check-in.
     private func saveCheckInPhotoIfNeeded() {
-        guard let plantName = primaryPlantName, let data = checkInNewPhotoData, !data.isEmpty else {
+        let plantName = checkInContextPlantName ?? primaryPlantName
+        guard let plantName, let data = checkInNewPhotoData, !data.isEmpty else {
             checkInNewPhotoData = nil
             checkInSelectedPhotoItem = nil
             return
@@ -283,10 +335,19 @@ struct TodayView: View {
         }
         checkInNewPhotoData = nil
         checkInSelectedPhotoItem = nil
+        checkInContextPlantName = nil
     }
 
     private func toggleComplete(_ task: CareTask) {
+        let wasCompleted = task.isCompleted
         task.isCompleted.toggle()
+        
+        if !wasCompleted && task.isCompleted {
+            // Only prompt for photo when the LAST task on the entire care schedule (all of today's tasks) is complete.
+            if !todaysTasks.isEmpty && todaysTasks.allSatisfy(\.isCompleted) {
+                checkInPhotoPromptPlantName = task.plantName
+            }
+        }
         Task { await syncCompletionToGoogle(task) }
     }
 
@@ -301,16 +362,20 @@ struct TodayView: View {
         }
     }
 
-    /// Google → App: on appear, fetch Google Tasks completion status and update local CareTasks.
-    private func syncCompletionFromGoogle() async {
+
+    private func syncCompletionFromGoogle(afterSync: (@Sendable () -> Void)? = nil) async {
         guard googleAuth.isSignedIn, let token = googleAuth.accessToken else { return }
         do {
             let statusMap = try await GoogleTasksService().fetchTasksStatus(accessToken: token)
-            for task in tasks where task.googleEventId != nil {
-                guard let id = task.googleEventId, let completed = statusMap[id] else { continue }
-                if task.isCompleted != completed {
-                    task.isCompleted = completed
+            await MainActor.run {
+                for task in tasks where task.googleEventId != nil {
+                    guard let id = task.googleEventId, let completed = statusMap[id] else { continue }
+                    if task.isCompleted != completed {
+                        task.isCompleted = completed
+                    }
                 }
+                try? modelContext.save()
+                afterSync?()
             }
         } catch {
             // Optionally surface error
@@ -333,16 +398,26 @@ struct ReviewPlanView: View {
     @State private var isSyncing = false
     @State private var syncStatusMessage = ""
     @State private var showSyncAlert = false
+    @State private var mutableDraftPlan: PendingCarePlan?
+    @State private var showFrequencyEditor = false
+    @State private var frequencyValue: Int = 1
+    @State private var frequencyUnit: FrequencyUnit = .weeks
+    @State private var editingKeyword: String = "water"
 
     init(plantName: String? = nil, draftPlan: PendingCarePlan? = nil, selectedTab: Binding<Int>? = nil, onDismissAfterApply: (() -> Void)? = nil) {
         self.plantName = plantName
         self.draftPlan = draftPlan
         self.selectedTab = selectedTab
         self.onDismissAfterApply = onDismissAfterApply
+        _mutableDraftPlan = State(initialValue: draftPlan)
+    }
+
+    private var effectiveDraftPlan: PendingCarePlan? {
+        mutableDraftPlan ?? draftPlan
     }
 
     private var activePlantName: String {
-        if let draftPlan {
+        if let draftPlan = effectiveDraftPlan {
             return draftPlan.plantName
         }
         if let plantName, !plantName.isEmpty {
@@ -352,7 +427,7 @@ struct ReviewPlanView: View {
     }
 
     private var activeTasks: [PendingCareTask] {
-        if let draftPlan {
+        if let draftPlan = effectiveDraftPlan {
             return draftPlan.tasks
         }
         return tasks
@@ -361,7 +436,7 @@ struct ReviewPlanView: View {
     }
 
     private var sourceTasks: [PendingCareTask] {
-        if draftPlan != nil {
+        if effectiveDraftPlan != nil {
             return activeTasks
         }
         if let plantName, !plantName.isEmpty {
@@ -387,8 +462,9 @@ struct ReviewPlanView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 Text("Review Plan")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
 
@@ -401,25 +477,40 @@ struct ReviewPlanView: View {
                     frequencyText: frequencyText(for: "water", fallback: "About once a week"),
                     nextDate: nextDate(for: "water"),
                     tipText: tipText(for: "water", fallback: "Water in the morning/evening; avoid noon heat."),
-                    confidenceText: confidenceText(for: "water")
+                    confidenceText: confidenceText(for: "water"),
+                    onEdit: effectiveDraftPlan != nil ? {
+                        preloadFrequency(for: "water")
+                        editingKeyword = "water"
+                        showFrequencyEditor = true
+                    } : nil
                 )
 
                 PlanCardView(
                     title: "Fertilize",
                     frequencyText: frequencyText(for: "fertiliz", fallback: "Once a month"),
                     nextDate: nextDate(for: "fertiliz"),
-                    tipText: tipText(for: "fertiliz", fallback: "Skip in winter if growth slows.")
+                    tipText: tipText(for: "fertiliz", fallback: "Skip in winter if growth slows."),
+                    onEdit: effectiveDraftPlan != nil ? {
+                        preloadFrequency(for: "fertiliz")
+                        editingKeyword = "fertiliz"
+                        showFrequencyEditor = true
+                    } : nil
                 )
 
                 PlanCardView(
                     title: "Soil Check",
                     frequencyText: frequencyText(for: "soil", fallback: "Every 1-2 weeks"),
                     nextDate: nextDate(for: "soil"),
-                    tipText: tipText(for: "soil", fallback: "Only water if top soil feels dry.")
+                    tipText: tipText(for: "soil", fallback: "Only water if top soil feels dry."),
+                    onEdit: effectiveDraftPlan != nil ? {
+                        preloadFrequency(for: "soil")
+                        editingKeyword = "soil"
+                        showFrequencyEditor = true
+                    } : nil
                 )
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Full Care Schedule")
+                    Text("Upcoming Care Schedule")
                         .font(.headline)
 
                     ForEach(sortedTasksByDate) { task in
@@ -490,6 +581,17 @@ struct ReviewPlanView: View {
                 }
             }
             .padding()
+            }
+
+            if showFrequencyEditor {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                VStack {
+                    frequencyEditorPanel
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.horizontal, 32)
+            }
         }
         .navigationTitle(activePlantName)
         .navigationBarTitleDisplayMode(.inline)
@@ -541,7 +643,7 @@ struct ReviewPlanView: View {
     }
 
     private func applyDraftPlan() async {
-        guard let draftPlan, let token = googleAuth.accessToken else { return }
+        guard let draftPlan = effectiveDraftPlan, let token = googleAuth.accessToken else { return }
         isApplying = true
 
         let existing = tasks.filter { $0.plantName.localizedCaseInsensitiveCompare(draftPlan.plantName) == .orderedSame }
@@ -597,8 +699,9 @@ struct ReviewPlanView: View {
                 to: Calendar.current.startOfDay(for: matched[1].dueDate)
             ).day ?? 0
             if days > 0 && days <= 3 { return "Every \(days) days" }
-            if days == 7 { return "About once a week" }
-            if days >= 28 { return "Once a month" }
+            if days == 7 { return "Every week" }
+            if days % 7 == 0 && days >= 14 { return "Every \(days / 7) weeks" }
+            if days >= 28 { return "Every month" }
             if days > 0 { return "Every \(days) days" }
         }
         return fallback
@@ -626,11 +729,22 @@ private struct PlanCardView: View {
     let nextDate: Date?
     let tipText: String
     var confidenceText: String? = nil
+    var onEdit: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(title) - \(frequencyText)")
-                .font(.headline)
+            HStack {
+                Text("\(title) - \(frequencyText)")
+                    .font(.headline)
+                Spacer()
+                if let onEdit {
+                    Button("Edit") {
+                        onEdit()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                }
+            }
 
             if let nextDate {
                 HStack(spacing: 6) {
@@ -655,6 +769,99 @@ private struct PlanCardView: View {
         .padding()
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .frame(minHeight: 150, alignment: .topLeading)
+    }
+}
+
+private enum FrequencyUnit: Hashable {
+    case days
+    case weeks
+}
+
+private extension ReviewPlanView {
+    var frequencyEditorPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Adjust frequency")
+                .font(.headline)
+
+            HStack(alignment: .center, spacing: 16) {
+                Picker("", selection: $frequencyValue) {
+                    ForEach(1...30, id: \.self) { value in
+                        Text("\(value)")
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(width: 80, height: 120)
+
+                Picker("", selection: $frequencyUnit) {
+                    Text("day(s)").tag(FrequencyUnit.days)
+                    Text("week(s)").tag(FrequencyUnit.weeks)
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Text("This will respace upcoming tasks of this type using this frequency. Other tasks stay the same.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button("Save") {
+                    applyFrequencyChange()
+                    showFrequencyEditor = false
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button("Cancel") {
+                    showFrequencyEditor = false
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    func preloadFrequency(for keyword: String) {
+        let matched = matchingTasks(keyword)
+        guard matched.count >= 2 else {
+            frequencyValue = 1
+            frequencyUnit = .weeks
+            return
+        }
+        let days = Calendar.current.dateComponents(
+            [.day],
+            from: Calendar.current.startOfDay(for: matched[0].dueDate),
+            to: Calendar.current.startOfDay(for: matched[1].dueDate)
+        ).day ?? 7
+        if days % 7 == 0 {
+            frequencyUnit = .weeks
+            frequencyValue = max(1, days / 7)
+        } else {
+            frequencyUnit = .days
+            frequencyValue = max(1, days)
+        }
+    }
+
+    func applyFrequencyChange() {
+        guard var plan = effectiveDraftPlan else { return }
+        let lowercasedTitles = plan.tasks.map { $0.title.lowercased() }
+        let indices = lowercasedTitles.indices.filter { lowercasedTitles[$0].contains(editingKeyword) }
+        guard indices.count >= 2 else { return }
+
+        let calendar = Calendar.current
+        let intervalDays = frequencyUnit == .days ? frequencyValue : frequencyValue * 7
+
+        var previousDate = plan.tasks[indices.first!].dueDate
+        for index in indices.dropFirst() {
+            if let newDate = calendar.date(byAdding: .day, value: intervalDays, to: previousDate) {
+                plan.tasks[index].dueDate = newDate
+                previousDate = newDate
+            }
+        }
+        plan.tasks.sort { $0.dueDate < $1.dueDate }
+        mutableDraftPlan = plan
     }
 }
 

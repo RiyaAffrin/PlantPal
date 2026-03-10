@@ -77,47 +77,41 @@ struct MeView: View {
                     .padding(.vertical, 12)
                 }
                 
-                
-                
+
 
                 // MARK: Settings
-                Section("Settings") {
-                    Toggle(isOn: $notificationsEnabled) {
-                        Label("Notifications", systemImage: "bell.fill")
-                    }
-                    .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
-                    .onChange(of: notificationsEnabled) { _, newValue in
-                        updateNotificationSettings(newValue)
-                    }
-                    
+                                Section("Settings") {
+                                    Toggle(isOn: $notificationsEnabled) {
+                                        Label("Notifications", systemImage: "bell.fill")
+                                    }
+                                    .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
+                                    .onChange(of: notificationsEnabled) { _, newValue in
+                                        updateNotificationSettings(newValue)
+                                    }
 
-                    HStack {
-                        Label("Theme", systemImage: "paintbrush.fill")
-                        Spacer()
-                        Picker("", selection: $selectedTheme) {
-                            Text("System").tag("System")
-                            Text("Light").tag("Light")
-                            Text("Dark").tag("Dark")
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                    }
+                                    HStack {
+                                        Label("Theme", systemImage: "paintbrush.fill")
+                                        Spacer()
+                                        Picker("", selection: $selectedTheme) {
+                                            Text("System").tag("System")
+                                            Text("Light").tag("Light")
+                                            Text("Dark").tag("Dark")
+                                        }
+                                        .labelsHidden()
+                                        .pickerStyle(.menu)
+                                    }
 
-                    
-                    NavigationLink {
-                        PrivacyView()
-                    } label: {
-                        Label("Privacy", systemImage: "hand.raised.fill")
-                        
-                    }
-                    
-                    
-                    
-                }
-
+                                    NavigationLink {
+                                        PrivacyView()
+                                    } label: {
+                                        Label("Privacy", systemImage: "hand.raised.fill")
+                                    }
+                                }
                 
                 
                 
+                
+
                 // MARK: My Plants
                 Section(header: Text("My Plants"), footer: Text("Swipe left on a plant to remove it.")) {
                     if plants.isEmpty {
@@ -173,7 +167,9 @@ struct MeView: View {
                 #if DEBUG
                 Section("Debug") {
                     Button("Clear All Data", role: .destructive) {
-                        clearAllData()
+                        Task {
+                            await clearAllData()
+                        }
                     }
                 }
                 #endif
@@ -220,6 +216,24 @@ struct MeView: View {
 
                 // MARK: About
                 Section("About") {
+                    HStack{
+                        Label("Theme", systemImage: "paintbrush.fill")
+                        Spacer()
+                        Picker("", selection: $selectedTheme){
+                            Text("System").tag("System")
+                            Text("Light").tag("Light")
+                            Text("Dark").tag("Dark")
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                    
+                    NavigationLink{
+                        PrivacyView()
+                    }label: {
+                        Label("Privacy", systemImage: "hand.raised.fill")
+                    }
+                    
                     HStack {
                         Label("Version", systemImage: "info.circle")
                         Spacer()
@@ -249,8 +263,13 @@ struct MeView: View {
             Button("Cancel", role: .cancel) { plantToDelete = nil }
             Button("Delete", role: .destructive) {
                 if let plant = plantToDelete {
-                    deletePlantAndRelatedData(plant)
-                    plantToDelete = nil
+                    Task {
+                        await deleteGoogleTasksForPlant(plant)
+                        await MainActor.run {
+                            deletePlantAndRelatedData(plant)
+                            plantToDelete = nil
+                        }
+                    }
                 }
                 
                 
@@ -297,7 +316,8 @@ struct PrivacyView: View {
 }
 
 private extension MeView {
-    func clearAllData() {
+    func clearAllData() async {
+        await deleteGoogleTasks(ids: allTasks.compactMap(\.googleEventId))
         plants.forEach { modelContext.delete($0) }
         messages.forEach { modelContext.delete($0) }
         summaries.forEach { modelContext.delete($0) }
@@ -328,6 +348,43 @@ private extension MeView {
         summaries.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         memories.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         allTasks.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
+    }
+
+    /// Deletes this plant's tasks from Google Tasks (by googleEventId) before local deletion.
+    func deleteGoogleTasksForPlant(_ plant: PlantProfile) async {
+        let name = plant.name
+        let taskIds = allTasks
+            .filter { $0.plantName.localizedCaseInsensitiveCompare(name) == .orderedSame }
+            .compactMap(\.googleEventId)
+            .filter { !$0.isEmpty }
+        await deleteGoogleTasks(ids: taskIds)
+    }
+
+    func deleteGoogleTasks(ids: [String]) async {
+        let taskIds = ids.filter { !$0.isEmpty }
+        guard !taskIds.isEmpty else { return }
+        guard let token = await resolveGoogleAccessTokenForDeletion() else {
+            calendarStatusMessage = "Could not delete Google Tasks because Google is not connected."
+            showCalendarAlert = true
+            return
+        }
+        do {
+            try await GoogleTasksService().deleteTasks(ids: taskIds, accessToken: token)
+        } catch {
+            calendarStatusMessage = "Failed to delete some Google Tasks: \(error.localizedDescription)"
+            showCalendarAlert = true
+        }
+    }
+
+    func resolveGoogleAccessTokenForDeletion() async -> String? {
+        if let token = googleAuth.accessToken, !token.isEmpty {
+            return token
+        }
+        await googleAuth.restorePreviousSignIn()
+        if let token = googleAuth.accessToken, !token.isEmpty {
+            return token
+        }
+        return nil
     }
 
     func connectGemini() {
