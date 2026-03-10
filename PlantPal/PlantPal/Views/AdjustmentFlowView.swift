@@ -2,7 +2,6 @@ import SwiftUI
 import SwiftData
 import UserNotifications
 
-
 struct MeView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlantProfile.createdAt, order: .reverse) private var plants: [PlantProfile]
@@ -23,6 +22,8 @@ struct MeView: View {
     @State private var isEditingName = false
     @State private var editingNameText = ""
 
+    
+    
     var body: some View {
         NavigationStack {
             List {
@@ -39,6 +40,7 @@ struct MeView: View {
                                 .foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.32))
                         }
 
+                        
                         if isEditingName {
                             TextField("Enter your name", text: $editingNameText)
                                 .multilineTextAlignment(.center)
@@ -47,12 +49,14 @@ struct MeView: View {
                                     userName = editingNameText
                                     isEditingName = false
                                 }
+                            
                         } else {
                             Text(userName.isEmpty ? "Add your name" : userName)
                                 .font(.headline)
                                 .foregroundStyle(userName.isEmpty ? .secondary : .primary)
                         }
 
+                        
                         Button(isEditingName ? "Save" : "Edit Profile") {
                             if isEditingName {
                                 userName = editingNameText
@@ -62,33 +66,35 @@ struct MeView: View {
                                 isEditingName = true
                             }
                         }
+                        
                         .font(.caption)
                         .buttonStyle(.bordered)
                         .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
+                        
+                        
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 }
                 
-                //MARK: Settings
+                
+                
+
+                // MARK: Settings
                 Section("Settings") {
                     Toggle(isOn: $notificationsEnabled) {
                         Label("Notifications", systemImage: "bell.fill")
                     }
                     .tint(Color(red: 0.35, green: 0.62, blue: 0.32))
-<<<<<<< Updated upstream
                     .onChange(of: notificationsEnabled) { _, newValue in
                         updateNotificationSettings(newValue)
-=======
-                    .onChange(of: notificationsEnabled) { _, newValue in updateNotificationSettings(newValue)
->>>>>>> Stashed changes
                     }
                     
-                    
-                    HStack{
+
+                    HStack {
                         Label("Theme", systemImage: "paintbrush.fill")
                         Spacer()
-                        Picker("", selection: $selectedTheme){
+                        Picker("", selection: $selectedTheme) {
                             Text("System").tag("System")
                             Text("Light").tag("Light")
                             Text("Dark").tag("Dark")
@@ -96,14 +102,21 @@ struct MeView: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                     }
+
                     
-                    NavigationLink{
+                    NavigationLink {
                         PrivacyView()
-                    }label: {
+                    } label: {
                         Label("Privacy", systemImage: "hand.raised.fill")
+                        
                     }
+                    
+                    
+                    
                 }
 
+                
+                
                 
                 // MARK: My Plants
                 Section(header: Text("My Plants"), footer: Text("Swipe left on a plant to remove it.")) {
@@ -115,6 +128,7 @@ struct MeView: View {
                         ForEach(plants) { plant in
                             NavigationLink {
                                 ReviewPlanView(plantName: plant.name)
+                                
                             } label: {
                                 HStack(spacing: 12) {
                                     ZStack {
@@ -123,6 +137,8 @@ struct MeView: View {
                                             .frame(width: 40, height: 40)
                                         Image(systemName: "leaf.fill")
                                             .foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.32))
+                                        
+                                        
                                     }
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(plant.name)
@@ -130,21 +146,29 @@ struct MeView: View {
                                         Text("\(plant.type) · \(plant.location)")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                        
+                                        
                                     }
+                                    
                                 }
+                                
                                 .padding(.vertical, 4)
+                                
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     plantToDelete = plant
                                 } label: {
                                     Label("Delete", systemImage: "trash")
+                                    
                                 }
                             }
+                            
                         }
                     }
+                    
+                    
                 }
-
 
                 #if DEBUG
                 Section("Debug") {
@@ -154,10 +178,8 @@ struct MeView: View {
                 }
                 #endif
 
-
-
-                // MARK: Connections (unchanged)
-
+                
+                // MARK: Connections
                 Section("Connections") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Connect to Gemini API to power your plant insights and chats.")
@@ -166,9 +188,13 @@ struct MeView: View {
                         Button("Connect to Gemini API") {
                             connectGemini()
                         }
+                        
+                        
                     }
                     .padding(.vertical, 6)
 
+                    
+                    
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Connect to Google Calendar to sync reminders and care schedules.")
                             .font(.subheadline)
@@ -182,8 +208,15 @@ struct MeView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    
                     .padding(.vertical, 6)
+                    
+                    
+                    
                 }
+                
+                
+                
 
                 // MARK: About
                 Section("About") {
@@ -197,6 +230,8 @@ struct MeView: View {
             }
             .navigationTitle("Profile")
         }
+        
+        
         .alert("Gemini", isPresented: $showGeminiAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -217,6 +252,8 @@ struct MeView: View {
                     deletePlantAndRelatedData(plant)
                     plantToDelete = nil
                 }
+                
+                
             }
         } message: {
             if let plant = plantToDelete {
@@ -230,6 +267,10 @@ struct MeView: View {
         }
     }
 }
+
+
+
+
 
 // MARK: Privacy View
 struct PrivacyView: View {
@@ -263,6 +304,7 @@ private extension MeView {
         memories.forEach { modelContext.delete($0) }
         allTasks.forEach { modelContext.delete($0) }
     }
+
     
     func updateNotificationSettings(_ enabled: Bool) {
         if enabled {
@@ -276,11 +318,9 @@ private extension MeView {
             notificationsEnabled = false
         }
     }
-    
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
+    
+    
     func deletePlantAndRelatedData(_ plant: PlantProfile) {
         let name = plant.name
         modelContext.delete(plant)
@@ -289,7 +329,7 @@ private extension MeView {
         memories.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
         allTasks.filter { $0.plantName == name }.forEach { modelContext.delete($0) }
     }
-    
+
     func connectGemini() {
         let apiKey = Bundle.main.object(forInfoDictionaryKey: "GEMINI_API_KEY") as? String
         if let apiKey, !apiKey.isEmpty, !apiKey.hasPrefix("<#") {
@@ -299,6 +339,7 @@ private extension MeView {
         }
         showGeminiAlert = true
     }
+
     
     func connectGoogleCalendar() {
         calendarStatusMessage = "Now connecting Google..."
@@ -307,11 +348,15 @@ private extension MeView {
             guard googleAuth.isSignedIn, let _ = googleAuth.accessToken else {
                 return
             }
-            
             calendarStatusMessage = "Connected to Google Calendar."
             showCalendarAlert = true
         }
+        
+        
+        
     }
+    
+    
+    
+    
 }
-
-
